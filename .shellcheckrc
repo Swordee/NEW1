@@ -1,0 +1,11 @@
+# 项目级 ShellCheck 配置
+# 参考：https://github.com/koalaman/shellcheck/wiki/Integration
+#
+# 指定脚本解释器（避免误判为 POSIX sh）
+shell=bash
+
+# 需要跳过某些规则时取消注释并追加，例如：
+# disable=SC1090,SC2155
+
+# 不跟随 source 外部文件
+external-sources=false

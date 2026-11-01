@@ -1,0 +1,29 @@
+# === 编辑器 / IDE ===
+.vscode/
+.idea/
+*.swp
+*~
+
+# === 系统 ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Python ===
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# === 本地运行产物 / 临时文件 ===
+*.log
+*.tmp
+*.bak
+/tmp/
+dist/
+*.tar.gz
+sshd_config_backups/
+
+# === WorkBuddy 项目数据（不推送）===
+.workbuddy-ai/
