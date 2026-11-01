@@ -82,11 +82,21 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 ### jsDelivr 使用注意
 
 - 路径格式：`https://cdn.jsdelivr.net/gh/<用户>/<仓库>@<分支或标签>/<文件路径>`
-- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.4`
-- 无 tag 时 `data.jsdelivr.com/v1/packages/gh/<用户>/<仓库>` 会返回 404，属正常现象，文件仍可用 `@main` 访问
+- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.4`（本仓库已打此标签）
+- 无 tag 时 `data.jsdelivr.com/v1/packages/gh/<用户>/<仓库>` 会返回 404；**即使打了 tag 也可能仍返回 404**，不影响文件访问，可忽略
 - 单文件上限 **20 MB**（本项目最大文件 `代码展示.html` 约 240 KB，无压力）
 - 内容有缓存，更新后可能延迟数分钟；可访问 `https://purge.jsdelivr.net/gh/Swordee/NEW1@main/<路径>` 强制刷新
 - **不支持私有仓库**
+
+### 缓存提示（实测踩坑）
+
+`raw.githubusercontent.com` 同样有 CDN 缓存（约 5 分钟），**刚 push 完立刻访问可能拿到上一版文件**，加查询参数也绕不过去。
+
+排查顺序：
+
+1. 用 GitHub API 确认真实内容：`/repos/<用户>/<仓库>/contents/<路径>?ref=main`
+2. 用 jsDelivr + purge 立即取新版
+3. 或直接用 commit sha 访问：`https://cdn.jsdelivr.net/gh/Swordee/NEW1@<commit-sha>/Debian%20SSH/install.sh`
 
 ## 目录约定
 
