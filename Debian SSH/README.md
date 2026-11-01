@@ -39,6 +39,29 @@ sudo bash change_ssh_port.sh -p 2222 -y --firewall   # 改端口 + 保留旧端�
 sudo bash change_ssh_port.sh -p 2222 -n              # 预演，不做任何修改
 ```
 
+## 一键安装（国内加速）
+
+`install.sh` 是自解压单文件，内嵌全部脚本，无需克隆整个仓库。
+
+```bash
+# jsDelivr（国内推荐）
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/Debian%20SSH/install.sh" | sudo bash
+
+# ghproxy.cc
+curl -fsSL "https://ghproxy.cc/https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
+
+# mirror.ghproxy.com
+curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
+
+# GitHub 直连
+curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
+```
+
+安装后可用命令：`ssh-port-change` / `ssh-port-remove`。完整参数见 [使用文档.md](./使用文档.md) 第 14 节。
+
+> ⚠️ 加速线路**只对 public 仓库生效**，私有仓库会 404。
+> 另：2026-11-01 实测 `ghproxy.cc` 证书已过期、`mirror.ghproxy.com` TLS 握手失败，jsDelivr 与 GitHub 直连正常。
+
 ## 安全设计
 
 - **改前必备份**：自动备份到 `/etc/ssh/sshd_config_backups/`

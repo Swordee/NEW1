@@ -26,13 +26,65 @@ cd "Debian SSH"     # 或 cd iptables / cd fail2ban
 单文件部署（以 SSH 工具为例，无需克隆）：
 
 ```bash
-# 需仓库为 public 才可直接拉取；当前仓库是 private，请先 clone 或用带 Token 的地址
 curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
 ```
 
 > 仓库当前为 **private**，上面的 `raw` 链接匿名访问会返回 404。两种解决方式：
 > 1. 在 Settings → General → Danger Zone 把仓库改为 public；
 > 2. 或先 `git clone`，再本地执行 `sudo bash "Debian SSH/install.sh"`。
+
+## 国内加速下载
+
+GitHub 直连在国内常不稳定，可用下列镜像。**三条加速线路都只对 public 仓库生效**，私有仓库会一律 404。
+
+### 单文件（SSH 工具安装器）
+
+| 线路 | 地址 |
+| --- | --- |
+| **jsDelivr** | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/Debian%20SSH/install.sh` |
+| **ghproxy.cc** | `https://ghproxy.cc/https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh` |
+| **mirror.ghproxy.com** | `https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh` |
+| GitHub 直连 | `https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh` |
+
+```bash
+# jsDelivr（国内通常最快，推荐）
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/Debian%20SSH/install.sh" | sudo bash
+
+# ghproxy.cc
+curl -fsSL "https://ghproxy.cc/https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
+
+# mirror.ghproxy.com
+curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
+```
+
+### 整包下载
+
+| 方式 | 地址 |
+| --- | --- |
+| zip 直连 | `https://github.com/Swordee/NEW1/archive/refs/heads/main.zip` |
+| zip 经 ghproxy.cc | `https://ghproxy.cc/https://github.com/Swordee/NEW1/archive/refs/heads/main.zip` |
+| zip 经 mirror.ghproxy.com | `https://mirror.ghproxy.com/https://github.com/Swordee/NEW1/archive/refs/heads/main.zip` |
+| git clone 加速 | `git clone https://ghproxy.cc/https://github.com/Swordee/NEW1.git` |
+| jsDelivr 目录浏览 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/` |
+
+> jsDelivr 是文件 CDN，**不支持 `git clone` 和整包 zip**，只能按文件路径取。
+
+### 线路状态（2026-11-01 实测）
+
+| 服务 | 状态 | 说明 |
+| --- | --- | --- |
+| jsDelivr | ✅ 可用 | 公开仓库内容返回 200 |
+| raw.githubusercontent.com | ✅ 可用 | 本机实测 200 |
+| ghproxy.cc | ⚠️ 不可用 | TLS 证书已过期（`SEC_E_CERT_EXPIRED`） |
+| mirror.ghproxy.com | ⚠️ 不可用 | TLS 握手失败，当前网络无法建立连接 |
+
+### jsDelivr 使用注意
+
+- 路径格式：`https://cdn.jsdelivr.net/gh/<用户>/<仓库>@<分支或标签>/<文件路径>`
+- 建议用**标签或 commit sha** 代替 `@main`，避免缓存导致内容滞后：`@v2.4`
+- 单文件上限 **20 MB**（本项目最大文件 `代码展示.html` 约 240 KB，无压力）
+- 内容有缓存，更新后可能延迟数分钟到数小时
+- **不支持私有仓库**
 
 ## 目录约定
 
