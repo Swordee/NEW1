@@ -59,8 +59,10 @@ curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/ins
 
 安装后可用命令：`ssh-port-change` / `ssh-port-remove`。完整参数见 [使用文档.md](./使用文档.md) 第 14 节。
 
-> ⚠️ 加速线路**只对 public 仓库生效**，私有仓库会 404。
-> 另：2026-11-01 实测 `ghproxy.cc` 证书已过期、`mirror.ghproxy.com` TLS 握手失败，jsDelivr 与 GitHub 直连正常。
+想锁定版本可用 jsDelivr 的标签写法：`@v2.4` 代替 `@main`。
+
+> 📌 加速线路只对 public 仓库生效（本仓库已是 public）。
+> 2026-11-01 实测：**jsDelivr ✅**、GitHub 直连 ✅；`ghproxy.cc` 证书已过期、`mirror.ghproxy.com` TLS 握手失败，二者暂不可用。
 
 ## 安全设计
 

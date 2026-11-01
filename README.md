@@ -29,13 +29,11 @@ cd "Debian SSH"     # 或 cd iptables / cd fail2ban
 curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
 ```
 
-> 仓库当前为 **private**，上面的 `raw` 链接匿名访问会返回 404。两种解决方式：
-> 1. 在 Settings → General → Danger Zone 把仓库改为 public；
-> 2. 或先 `git clone`，再本地执行 `sudo bash "Debian SSH/install.sh"`。
+> 仓库已设为 **public**，以上地址均可匿名访问。
 
 ## 国内加速下载
 
-GitHub 直连在国内常不稳定，可用下列镜像。**三条加速线路都只对 public 仓库生效**，私有仓库会一律 404。
+GitHub 直连在国内常不稳定，可用下列镜像（三条线路均只对 public 仓库生效）。
 
 ### 单文件（SSH 工具安装器）
 
@@ -69,21 +67,25 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 
 > jsDelivr 是文件 CDN，**不支持 `git clone` 和整包 zip**，只能按文件路径取。
 
-### 线路状态（2026-11-01 实测）
+### 线路状态（2026-11-01 实测，仓库已 public）
 
-| 服务 | 状态 | 说明 |
+| 服务 | 状态 | 实测 |
 | --- | --- | --- |
-| jsDelivr | ✅ 可用 | 公开仓库内容返回 200 |
-| raw.githubusercontent.com | ✅ 可用 | 本机实测 200 |
-| ghproxy.cc | ⚠️ 不可用 | TLS 证书已过期（`SEC_E_CERT_EXPIRED`） |
-| mirror.ghproxy.com | ⚠️ 不可用 | TLS 握手失败，当前网络无法建立连接 |
+| **jsDelivr** | ✅ 可用 | `install.sh` 返回 200（29,922 B） |
+| **raw.githubusercontent.com** | ✅ 可用 | 200（29,922 B） |
+| GitHub zip 直连 | ✅ 可用 | 200（185,566 B） |
+| **ghproxy.cc** | ❌ 不可用 | TLS 证书已过期（`SEC_E_CERT_EXPIRED`） |
+| **mirror.ghproxy.com** | ❌ 不可用 | TLS 握手失败，无法建立连接 |
+
+> ghproxy 两条线路失效与服务本身有关，不是配置问题。等其证书续期 / 服务恢复后可再试；当前请优先用 **jsDelivr**。
 
 ### jsDelivr 使用注意
 
 - 路径格式：`https://cdn.jsdelivr.net/gh/<用户>/<仓库>@<分支或标签>/<文件路径>`
-- 建议用**标签或 commit sha** 代替 `@main`，避免缓存导致内容滞后：`@v2.4`
+- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.4`
+- 无 tag 时 `data.jsdelivr.com/v1/packages/gh/<用户>/<仓库>` 会返回 404，属正常现象，文件仍可用 `@main` 访问
 - 单文件上限 **20 MB**（本项目最大文件 `代码展示.html` 约 240 KB，无压力）
-- 内容有缓存，更新后可能延迟数分钟到数小时
+- 内容有缓存，更新后可能延迟数分钟；可访问 `https://purge.jsdelivr.net/gh/Swordee/NEW1@main/<路径>` 强制刷新
 - **不支持私有仓库**
 
 ## 目录约定
