@@ -37,9 +37,9 @@ sudo ./install.sh install --port 2222 --ignore-ip "1.2.3.4/32" -y
 sudo ./install.sh menu                               # 交互菜单
 ```
 
-### 方式三：私有仓库下载（GitHub API + Token）
+### 方式三：私有/内网下载（GitHub API + Token）
 
-本仓库为 **Private**，无法用 jsDelivr / raw 匿名访问，需带 Token 走 GitHub API。
+仓库若为 **Private**，或需在受限网络下载，可带 Token 走 GitHub API（不依赖 CDN）。
 
 ```bash
 export GITHUB_TOKEN=ghp_xxxxxxxx          # 需 repo 读权限（fine-grained 选 Contents: Read）
@@ -66,10 +66,10 @@ GITHUB_TOKEN=ghp_xxx ./scripts/fetch-private.sh --dest ./src
 
 支持参数：`--owner` / `--repo` / `--ref` / `--subdir` / `--dest`。
 
-### 方式四：国内 CDN 加速（jsDelivr，仅公开仓库可用）
+### 方式四：国内 CDN 加速（jsDelivr）
 
-> ⚠️ **当前仓库是 Private，下列 jsDelivr 链接会返回 404。** jsDelivr 只能读取公开仓库，
-> 如需使用请先把 `NEW1` 设为 Public；私有场景请用「方式三」。
+> ✅ 本仓库为公开仓库，jsDelivr 可直接访问（国内通常比 `raw.githubusercontent.com` 更稳定）。
+> 若将来把仓库改回 Private，CDN 会失效，请改用「方式三」。
 
 ```bash
 # 固定版本（推荐，内容不可变）
