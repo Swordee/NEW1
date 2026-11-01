@@ -13,7 +13,8 @@ fail2ban/
 ├── .shellcheckrc               # ShellCheck 配置（severity=info）
 └── scripts/
     ├── build-install.sh        # 由主脚本重新生成 install.sh（内嵌 base64）
-    └── ci-shellcheck.sh        # 本地/CI 通用静态检查
+    ├── ci-shellcheck.sh        # 本地/CI 通用静态检查
+    └── fetch-private.sh        # 私有仓库下载（GitHub API + Token）
 ```
 
 ## 快速开始
@@ -36,11 +37,57 @@ sudo ./install.sh install --port 2222 --ignore-ip "1.2.3.4/32" -y
 sudo ./install.sh menu                               # 交互菜单
 ```
 
-### 方式三：远程一键执行
+### 方式三：私有仓库下载（GitHub API + Token）
+
+本仓库为 **Private**，无法用 jsDelivr / raw 匿名访问，需带 Token 走 GitHub API。
 
 ```bash
-curl -fsSL <install.sh 的原始链接> | bash -s -- install --port 2222 -y
+export GITHUB_TOKEN=ghp_xxxxxxxx          # 需 repo 读权限（fine-grained 选 Contents: Read）
+
+# 1) 取下载脚本
+curl -fsSL \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/Swordee/NEW1/contents/fail2ban/scripts/fetch-private.sh?ref=main" \
+  -o fetch-private.sh
+
+# 2) 拉取整套工具到 ./src
+bash fetch-private.sh --dest ./src
+
+# 3) 安装
+sudo ./src/fail2ban/install.sh install --port 2222 -y
 ```
+
+也可以直接使用仓库内已有的脚本：
+
+```bash
+GITHUB_TOKEN=ghp_xxx ./scripts/fetch-private.sh --dest ./src
+```
+
+支持参数：`--owner` / `--repo` / `--ref` / `--subdir` / `--dest`。
+
+### 方式四：国内 CDN 加速（jsDelivr，仅公开仓库可用）
+
+> ⚠️ **当前仓库是 Private，下列 jsDelivr 链接会返回 404。** jsDelivr 只能读取公开仓库，
+> 如需使用请先把 `NEW1` 设为 Public；私有场景请用「方式三」。
+
+```bash
+# 固定版本（推荐，内容不可变）
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.0/fail2ban/install.sh \
+  | bash -s -- install --port 2222 -y
+
+# 跟随 main（可能被 CDN 缓存，默认数小时）
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh \
+  | bash -s -- install --port 2222 -y
+```
+
+| 用途 | 地址 |
+|------|------|
+| 固定版本 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.0/fail2ban/install.sh` |
+| 最新 main | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh` |
+| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/` |
+
+说明：`@v1.0.0` 为标签，内容固定；`@main` 会随分支更新，可能被 CDN 缓存。若需刷新缓存，可在 URL 后加 `?t=时间戳`。
 
 ## 常用命令
 
