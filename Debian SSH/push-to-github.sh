@@ -214,8 +214,12 @@ main() {
 
     command -v git >/dev/null 2>&1 || die "未找到 git，请先安装：https://git-scm.com/downloads"
 
-    cd "$(dirname "${BASH_SOURCE[0]}")" || die "无法进入脚本所在目录"
-    local root
+    local here root
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || die "无法进入脚本所在目录"
+    # 脚本可能位于分类子目录（如 Debian SSH/），需定位到仓库根再操作，
+    # 否则 git add -A 只会暂存当前子目录
+    root="$(git -C "$here" rev-parse --show-toplevel 2>/dev/null || true)"
+    cd "${root:-$here}" || die "无法进入项目目录"
     root="$(pwd)"
     info "项目目录: $root"
 

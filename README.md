@@ -1,110 +1,58 @@
-# Debian SSH 端口更换工具包
+# Debian 运维工具集
 
-带交互提示、可安全回滚的 SSH 端口更换脚本，覆盖「改端口 → 验证 → 收尾清理」全流程，规避"改完连不上、把自己锁在门外"的风险。
+面向 **Debian / Ubuntu** 的一站式运维脚本合集。每个分类独立成目录，自带一键脚本、自解压安装器、中文文档与 ShellCheck CI 检查，复制即用。
 
-> 📖 完整手册见 **[使用文档.md](使用文档.md)**
+> 仓库地址：<https://github.com/Swordee/NEW1>
 
 ## 分类
 
-| 分类 | 内容 |
-| --- | --- |
-| **[Debian SSH](Debian%20SSH/README.md)** | SSH 端口更换工具、安装器、检查脚本与文档 |
-| **[iptables](iptables/README.md)** | Debian iptables 防火墙一键管理工具 |
-| **[fail2ban](fail2ban/README.md)** | Debian fail2ban 入侵防护工具集 |
+| 分类 | 说明 | 入口 |
+| --- | --- | --- |
+| **Debian SSH** | 安全更换 SSH 端口：交互式脚本、过渡期保留旧端口、校验失败自动回滚 | [进入分类](https://github.com/Swordee/NEW1/tree/main/Debian%20SSH) |
+| **iptables** | iptables 防火墙一键管理，纯 Bash 无 whiptail 依赖，变更前自动备份 | [进入分类](https://github.com/Swordee/NEW1/tree/main/iptables) |
+| **fail2ban** | Fail2ban 落地工具集：一键脚本、安装器、中文文档与自定义规则范本 | [进入分类](https://github.com/Swordee/NEW1/tree/main/fail2ban) |
 
-## 一键安装（自解压）
-
-`install.sh` 内嵌全部脚本，可单文件分发，无需额外下载：
+## 快速取用
 
 ```bash
-# 远程一键（需 root）
-curl -fsSL https://your.host/install.sh | sudo bash
+# 克隆仓库
+git clone https://github.com/Swordee/NEW1.git
+cd NEW1
 
-# 安装并立即运行更换端口脚本
-curl -fsSL https://your.host/install.sh | sudo bash -s -- -y --run
-
-# 本地安装到自定义目录
-sudo bash install.sh -d /opt/ssh-port-tools
+# 进入需要的分类，按各自 README 操作
+cd "Debian SSH"     # 或 cd iptables / cd fail2ban
 ```
 
-安装后可直接使用命令：`ssh-port-change` / `ssh-port-remove`。
-
-## 文件
-
-| 文件 | 作用 |
-| --- | --- |
-| `change_ssh_port.sh` | 主脚本：更换端口，支持过渡期保留旧端口 |
-| `remove_old_ssh_port.sh` | 收尾脚本：验证通过后移除旧端口 |
-| `install.sh` | 自解压一键安装器（内嵌全部脚本） |
-| `install.template` | 安装器模板（构建源，非 .sh 不参与检查） |
-| `build_install.py` | 打包生成 install.sh 的脚本 |
-| `push-to-github.sh` | 一键推送到 GitHub（Token 静默输入，不落盘） |
-| `check.sh` | 本地 / CI 统一检查入口（bash -n + ShellCheck） |
-| `.shellcheckrc` | ShellCheck 项目配置 |
-| `.github/workflows/shellcheck.yml` | GitHub Actions 自动检查 |
-| `代码展示.html` | 带语法高亮的代码展示页 |
-| `使用文档.md` | 完整使用手册 |
-
-## 推送到 GitHub
+单文件部署（以 SSH 工具为例，无需克隆）：
 
 ```bash
-# 交互式：提示输入用户名 / 仓库名 / Token
-bash push-to-github.sh
-
-# 非交互
-GH_TOKEN=ghp_xxx bash push-to-github.sh -u 你的用户名 -r debian-ssh-port-tool --public
+curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
 ```
 
-Token 在 <https://github.com/settings/tokens/new> 生成，勾选 `repo` 权限。脚本会校验 `.gitignore`、创建提交、可选自动建仓，并把 Token 通过一次性 credential helper 传入——**不写入 `.git/config`**。
+## 目录约定
 
-> 手动推送等价命令：
-> ```bash
-> git remote add origin https://github.com/<用户名>/<仓库名>.git
-> git push -u origin main
-> ```
+每个分类目录结构基本一致：
 
-## 快速开始
-
-```bash
-# 1. 更换端口（建议保留旧端口过渡）
-sudo bash change_ssh_port.sh
-
-# 2. 另开终端，用新端口测试登录
-ssh -p 新端口 用户@服务器IP
-
-# 3. 验证成功后，关闭旧端口
-sudo bash remove_old_ssh_port.sh
+```
+<分类名>/
+├── README.md          分类说明与快速开始
+├── <主脚本>.sh        核心工具
+├── install.sh         自解压安装器（curl | bash）
+├── 文档 / 规则模板
+└── scripts/           打包与 CI 辅助脚本
 ```
 
-## 自动化用法
-
-```bash
-# 全自动：改端口 + 保留旧端口 + 放行防火墙
-sudo bash change_ssh_port.sh -p 2222 -y --firewall
-
-# 预演，不做任何修改
-sudo bash change_ssh_port.sh -p 2222 -n
-```
-
-## 安全机制
-
-- 自动备份到 `/etc/ssh/sshd_config_backups/`
-- `sshd -t` 校验失败自动回滚
-- 默认保留旧端口过渡，验证通过再清理
-- 重启后自动验证端口监听
-- 操作日志：`/var/log/change_ssh_port.log`
+- 脚本统一用 `bash -n` + ShellCheck（style 级）校验，CI 在 GitHub Actions 上自动运行
+- 修改类脚本默认「先备份 → 再改 → 校验 → 失败自动回滚」
+- 所有脚本面向 Debian 10 / 11 / 12，需要 root 权限
 
 ## 代码检查
 
 ```bash
-# 语法检查 + ShellCheck（style 级）
-bash check.sh
+# SSH 分类自带全仓库检查入口（扫描所有 *.sh）
+bash "Debian SSH/check.sh"
 ```
 
-CI 通过 GitHub Actions 自动运行（`.github/workflows/shellcheck.yml`）。当前 ShellCheck 0.11 全量检查 **0 告警**。
+## 免责声明
 
-## 注意
-
-- 需 root 运行
-- 云服务器还需在**安全组**放行新端口
-- 详细参数、原理、FAQ、回滚见 [使用文档.md](使用文档.md)
+脚本会修改系统网络与 SSH 配置。请在**测试环境先行验证**，并保留至少一个活跃 SSH 会话，直到确认新配置可用。使用风险自负。

@@ -6,14 +6,20 @@
 
 | 文件 | 类型 | 说明 |
 | --- | --- | --- |
-| [change_ssh_port.sh](../change_ssh_port.sh) | 主脚本 | 交互式/半自动更换 SSH 端口，支持过渡期保留旧端口 |
-| [remove_old_ssh_port.sh](../remove_old_ssh_port.sh) | 收尾脚本 | 新端口验证通过后，安全移除旧端口 |
-| [install.sh](../install.sh) | 安装器 | 自解压单文件，支持 `curl \| bash` 一键部署 |
-| [check.sh](../check.sh) | 质量检查 | 本地 / CI 统一入口（`bash -n` + ShellCheck） |
-| [使用文档.md](../使用文档.md) | 文档 | 完整手册：参数、原理、回滚、FAQ |
-| [代码展示.html](../代码展示.html) | 展示页 | 带行号与语法高亮的源码 + 修复记录 |
+| [change_ssh_port.sh](./change_ssh_port.sh) | 主脚本 | 交互式/半自动更换 SSH 端口，支持过渡期保留旧端口 |
+| [remove_old_ssh_port.sh](./remove_old_ssh_port.sh) | 收尾脚本 | 新端口验证通过后，安全移除旧端口 |
+| [install.sh](./install.sh) | 安装器 | 自解压单文件，支持 `curl \| bash` 一键部署 |
+| [check.sh](./check.sh) | 质量检查 | 本地 / CI 统一入口（`bash -n` + ShellCheck） |
+| [使用文档.md](./使用文档.md) | 文档 | 完整手册：参数、原理、回滚、FAQ |
+| [代码展示.html](./代码展示.html) | 展示页 | 带行号与语法高亮的源码 + 修复记录 |
 
 ## 快速开始
+
+先进入本目录：
+
+```bash
+cd "Debian SSH"
+```
 
 ```bash
 # 1. 更换端口（建议保留旧端口过渡）

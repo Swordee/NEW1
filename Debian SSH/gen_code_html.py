@@ -5,7 +5,7 @@ from pygments import highlight
 from pygments.lexers import BashLexer
 from pygments.formatters import HtmlFormatter
 
-BASE = r"C:\Users\1\WorkBuddy AI\2026-10-31-22-45-52"
+BASE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE, "代码展示.html")
 
 FILES = [

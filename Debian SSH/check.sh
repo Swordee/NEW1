@@ -16,7 +16,14 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 在 git 仓库内 → 扫描整个仓库（CI / 本地开发场景）
+# 不在仓库内 → 扫描脚本所在目录（install.sh 安装后的独立副本场景）
+if ROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$ROOT" ]]; then
+    :
+else
+    ROOT="$HERE"
+fi
 SEVERITY="${SHELLCHECK_SEVERITY:-style}"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }

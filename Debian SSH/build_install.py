@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """把脚本打包进 install.sh（自解压）。
 
-用法：python build_install.py
-产出：install.sh（可执行，内嵌 base64(tar.gz) 负载 + sha256 清单）
+用法：python "Debian SSH/build_install.py"
+产出：与脚本同目录的 install.sh（内嵌 base64(tar.gz) 负载 + sha256 清单）
+
+路径说明：本脚本位于分类目录内（如 "Debian SSH/"），
+         HERE 为分类目录，ROOT 为仓库根，.shellcheckrc 等仓库级文件从 ROOT 取。
 """
 import base64
 import datetime
@@ -11,31 +14,33 @@ import io
 import os
 import tarfile
 
-BASE = r"C:\Users\1\WorkBuddy AI\2026-10-31-22-45-52"
-TEMPLATE = os.path.join(BASE, "install.template")
-OUTPUT = os.path.join(BASE, "install.sh")
+HERE = os.path.dirname(os.path.abspath(__file__))
+CATEGORY = os.path.basename(HERE)
+ROOT = os.path.dirname(HERE)
+
+TEMPLATE = os.path.join(HERE, "install.template")
+OUTPUT = os.path.join(HERE, "install.sh")
 INSTALLER_VERSION = "1.0.0"
 
-# 打进安装包的文件（顺序即清单顺序）
+# (源文件相对仓库根的路径, 包内名称)
 FILES = [
-    "change_ssh_port.sh",
-    "remove_old_ssh_port.sh",
-    "check.sh",
-    ".shellcheckrc",
-    "README.md",
-    "使用文档.md",
-    "Debian SSH/README.md",
+    (f"{CATEGORY}/change_ssh_port.sh", "change_ssh_port.sh"),
+    (f"{CATEGORY}/remove_old_ssh_port.sh", "remove_old_ssh_port.sh"),
+    (f"{CATEGORY}/check.sh", "check.sh"),
+    (".shellcheckrc", ".shellcheckrc"),
+    (f"{CATEGORY}/README.md", "README.md"),
+    (f"{CATEGORY}/使用文档.md", "使用文档.md"),
 ]
 
 
 def build_tarball() -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        for name in FILES:
-            path = os.path.join(BASE, name)
+        for src, arc in FILES:
+            path = os.path.join(ROOT, src)
             if not os.path.exists(path):
-                raise SystemExit(f"缺少文件: {name}")
-            info = tar.gettarinfo(path, arcname=name)
+                raise SystemExit(f"缺少文件: {src}")
+            info = tar.gettarinfo(path, arcname=arc)
             info.uid = info.gid = 0
             info.uname = info.gname = "root"
             with open(path, "rb") as fh:
@@ -49,10 +54,10 @@ def main() -> None:
     b64_wrapped = "\n".join(b64[i:i + 76] for i in range(0, len(b64), 76))
 
     manifest_lines = []
-    for name in FILES:
-        with open(os.path.join(BASE, name), "rb") as fh:
+    for src, arc in FILES:
+        with open(os.path.join(ROOT, src), "rb") as fh:
             digest = hashlib.sha256(fh.read()).hexdigest()
-        manifest_lines.append(f"{digest}  {name}")
+        manifest_lines.append(f"{digest}  {arc}")
     manifest = "\n".join(manifest_lines)
 
     with open(TEMPLATE, encoding="utf-8") as fh:

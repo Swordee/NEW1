@@ -1607,7 +1607,7 @@ main<span class="w"> </span><span class="s2">"</span><span class="nv">$@</span><
     <span class="dot dot-secondary"></span>
     <h2>push-to-github.sh</h2>
     <span class="badge">推送脚本 · GitHub 一键推送</span>
-    <span class="meta">384 行 · 13.9 KB</span>
+    <span class="meta">388 行 · 14.2 KB</span>
   </div>
   <div class="code-wrap">
     <div class="hl"><table class="hltable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
@@ -1993,7 +1993,11 @@ main<span class="w"> </span><span class="s2">"</span><span class="nv">$@</span><
 <span class="normal">381</span>
 <span class="normal">382</span>
 <span class="normal">383</span>
-<span class="normal">384</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env bash</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env bash</span>
 <span class="c1">#</span>
 <span class="c1"># push-to-github.sh — 将本项目一键推送到 GitHub</span>
 <span class="c1">#</span>
@@ -2209,8 +2213,12 @@ main<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 
 <span class="w">    </span><span class="nb">command</span><span class="w"> </span>-v<span class="w"> </span>git<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>die<span class="w"> </span><span class="s2">"未找到 git，请先安装：https://git-scm.com/downloads"</span>
 
-<span class="w">    </span><span class="nb">cd</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>die<span class="w"> </span><span class="s2">"无法进入脚本所在目录"</span>
-<span class="w">    </span><span class="nb">local</span><span class="w"> </span>root
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>here<span class="w"> </span>root
+<span class="w">    </span><span class="nv">here</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>die<span class="w"> </span><span class="s2">"无法进入脚本所在目录"</span>
+<span class="w">    </span><span class="c1"># 脚本可能位于分类子目录（如 Debian SSH/），需定位到仓库根再操作，</span>
+<span class="w">    </span><span class="c1"># 否则 git add -A 只会暂存当前子目录</span>
+<span class="w">    </span><span class="nv">root</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="nv">$here</span><span class="s2">"</span><span class="w"> </span>rev-parse<span class="w"> </span>--show-toplevel<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span><span class="k">)</span><span class="s2">"</span>
+<span class="w">    </span><span class="nb">cd</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">root</span><span class="k">:-</span><span class="nv">$here</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>die<span class="w"> </span><span class="s2">"无法进入项目目录"</span>
 <span class="w">    </span><span class="nv">root</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">"</span>
 <span class="w">    </span>info<span class="w"> </span><span class="s2">"项目目录: </span><span class="nv">$root</span><span class="s2">"</span>
 
