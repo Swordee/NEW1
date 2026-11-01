@@ -26,8 +26,13 @@ cd "Debian SSH"     # 或 cd iptables / cd fail2ban
 单文件部署（以 SSH 工具为例，无需克隆）：
 
 ```bash
+# 需仓库为 public 才可直接拉取；当前仓库是 private，请先 clone 或用带 Token 的地址
 curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
 ```
+
+> 仓库当前为 **private**，上面的 `raw` 链接匿名访问会返回 404。两种解决方式：
+> 1. 在 Settings → General → Danger Zone 把仓库改为 public；
+> 2. 或先 `git clone`，再本地执行 `sudo bash "Debian SSH/install.sh"`。
 
 ## 目录约定
 
