@@ -24,6 +24,7 @@ FILES = [
     ".shellcheckrc",
     "README.md",
     "使用文档.md",
+    "Debian SSH/README.md",
 ]
 
 

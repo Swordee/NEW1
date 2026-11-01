@@ -170,6 +170,11 @@ do_install() {
     if [[ $NO_DOC -eq 0 ]]; then
         cp -f "$tmp/README.md"   "$DIR/" 2>/dev/null || true
         cp -f "$tmp/使用文档.md" "$DIR/" 2>/dev/null || true
+        # 分类索引（README 里的相对链接依赖这个目录结构）
+        if [[ -f "$tmp/Debian SSH/README.md" ]]; then
+            mkdir -p "$DIR/Debian SSH"
+            cp -f "$tmp/Debian SSH/README.md" "$DIR/Debian SSH/" 2>/dev/null || true
+        fi
         chmod 644 "$DIR"/*.md 2>/dev/null || true
     fi
 
