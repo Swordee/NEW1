@@ -144,6 +144,19 @@ git_push_with_token() {
         push -u "$url" "$branch"
 }
 
+# 拉取远程 main；远程为空仓库时返回非零（调用方容忍即可）
+git_fetch_remote() {
+    local url="$1"
+    if [[ "$MODE" == "https" ]]; then
+        # shellcheck disable=SC2016
+        GH_USER="$GH_USER" GH_TOKEN="$GH_TOKEN" GIT_TERMINAL_PROMPT=0 \
+            git -c credential.helper='!f() { echo username="$GH_USER"; echo password="$GH_TOKEN"; }; f' \
+            fetch -q "$url" main >/dev/null 2>&1
+    else
+        GIT_TERMINAL_PROMPT=0 git fetch -q "$url" main >/dev/null 2>&1
+    fi
+}
+
 # 调 GitHub API 创建仓库（Token 通过 curl 配置文件传入，不进 argv）
 create_repo_api() {
     local name="$1" vis="$2" cfg rc=0
@@ -261,6 +274,41 @@ main() {
         printf '\n'
     fi
 
+    # ---------- 建仓与 remote（放在提交之前，便于对齐远程已有历史）----------
+    local url=""
+    if [[ "$MODE" != "local" ]]; then
+        if [[ "$MODE" == "https" && $DRY_RUN -eq 0 ]]; then
+            info "检查 / 创建远程仓库 ..."
+            create_repo_api "$GH_REPO" "$VISIBILITY" || warn "跳过自动建仓，将直接尝试推送（仓库需已存在）"
+        fi
+
+        if [[ "$MODE" == "ssh" ]]; then
+            url="git@github.com:${GH_USER}/${GH_REPO}.git"
+        else
+            url="https://github.com/${GH_USER}/${GH_REPO}.git"
+        fi
+
+        if git remote get-url origin >/dev/null 2>&1; then
+            info "更新 origin → $url"
+            run git remote set-url origin "$url"
+        else
+            info "添加 origin → $url"
+            run git remote add origin "$url"
+        fi
+
+        # 远程若已有初始提交（建仓时勾了 README 就会这样），把本地接到它上面，
+        # 避免 unrelated histories / non-fast-forward 报错。
+        # 仅在本地还没有任何提交时执行，绝不会覆盖已有历史。
+        if [[ $DRY_RUN -eq 0 ]] && ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+            if git_fetch_remote "$url"; then
+                if git rev-parse --verify origin/main >/dev/null 2>&1; then
+                    git reset --soft origin/main
+                    ok "已对齐远程 main 历史（本次提交将作为它的后继）"
+                fi
+            fi
+        fi
+    fi
+
     # ---------- 提交 ----------
     run git add -A
 
@@ -289,30 +337,6 @@ main() {
         printf '  git remote add origin https://github.com/<你的用户名>/<仓库名>.git\n'
         printf '  git push -u origin main\n'
         return 0
-    fi
-
-    # ---------- 建仓 ----------
-    if [[ "$MODE" == "https" ]]; then
-        if [[ $DRY_RUN -eq 0 ]]; then
-            info "检查 / 创建远程仓库 ..."
-            create_repo_api "$GH_REPO" "$VISIBILITY" || warn "跳过自动建仓，将直接尝试推送（仓库需已存在）"
-        fi
-    fi
-
-    # ---------- 配置 remote ----------
-    local url
-    if [[ "$MODE" == "ssh" ]]; then
-        url="git@github.com:${GH_USER}/${GH_REPO}.git"
-    else
-        url="https://github.com/${GH_USER}/${GH_REPO}.git"
-    fi
-
-    if git remote get-url origin >/dev/null 2>&1; then
-        info "更新 origin → $url"
-        run git remote set-url origin "$url"
-    else
-        info "添加 origin → $url"
-        run git remote add origin "$url"
     fi
 
     # ---------- 最终确认 ----------
@@ -344,7 +368,9 @@ main() {
         printf '\n排查建议：\n'
         printf '  1. Token 是否勾选了 repo 权限、是否过期\n'
         printf '  2. 仓库名是否与 GitHub 上一致（大小写敏感）\n'
-        printf '  3. 若报 non-fast-forward，先执行: git pull --rebase origin main\n'
+        printf '  3. 若报 non-fast-forward / unrelated histories，说明远程已有提交：\n'
+        printf '     git fetch origin main && git log --oneline origin/main   # 先看清远程内容\n'
+        printf '     git pull --rebase --allow-unrelated-histories origin main # 再合并\n'
         printf '  4. 网络受限可配置代理: git config --global http.proxy http://127.0.0.1:7890\n'
         exit "$rc"
     fi

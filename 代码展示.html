@@ -1607,7 +1607,7 @@ main<span class="w"> </span><span class="s2">"</span><span class="nv">$@</span><
     <span class="dot dot-secondary"></span>
     <h2>push-to-github.sh</h2>
     <span class="badge">推送脚本 · GitHub 一键推送</span>
-    <span class="meta">358 行 · 12.4 KB</span>
+    <span class="meta">384 行 · 13.9 KB</span>
   </div>
   <div class="code-wrap">
     <div class="hl"><table class="hltable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
@@ -1967,7 +1967,33 @@ main<span class="w"> </span><span class="s2">"</span><span class="nv">$@</span><
 <span class="normal">355</span>
 <span class="normal">356</span>
 <span class="normal">357</span>
-<span class="normal">358</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env bash</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env bash</span>
 <span class="c1">#</span>
 <span class="c1"># push-to-github.sh — 将本项目一键推送到 GitHub</span>
 <span class="c1">#</span>
@@ -2113,6 +2139,19 @@ git_push_with_token<span class="o">()</span><span class="w"> </span><span class=
 <span class="w">        </span>push<span class="w"> </span>-u<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$branch</span><span class="s2">"</span>
 <span class="o">}</span>
 
+<span class="c1"># 拉取远程 main；远程为空仓库时返回非零（调用方容忍即可）</span>
+git_fetch_remote<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span><span class="nv">url</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="nv">$MODE</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"https"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span><span class="c1"># shellcheck disable=SC2016</span>
+<span class="w">        </span><span class="nv">GH_USER</span><span class="o">=</span><span class="s2">"</span><span class="nv">$GH_USER</span><span class="s2">"</span><span class="w"> </span><span class="nv">GH_TOKEN</span><span class="o">=</span><span class="s2">"</span><span class="nv">$GH_TOKEN</span><span class="s2">"</span><span class="w"> </span><span class="nv">GIT_TERMINAL_PROMPT</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="w">            </span>git<span class="w"> </span>-c<span class="w"> </span>credential.helper<span class="o">=</span><span class="s1">'!f() { echo username="$GH_USER"; echo password="$GH_TOKEN"; }; f'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">            </span>fetch<span class="w"> </span>-q<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span><span class="w"> </span>main<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">        </span><span class="nv">GIT_TERMINAL_PROMPT</span><span class="o">=</span><span class="m">0</span><span class="w"> </span>git<span class="w"> </span>fetch<span class="w"> </span>-q<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span><span class="w"> </span>main<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="o">}</span>
+
 <span class="c1"># 调 GitHub API 创建仓库（Token 通过 curl 配置文件传入，不进 argv）</span>
 create_repo_api<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">    </span><span class="nb">local</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span><span class="w"> </span><span class="nv">vis</span><span class="o">=</span><span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span><span class="w"> </span>cfg<span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span>
@@ -2230,6 +2269,41 @@ main<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'\n'</span>
 <span class="w">    </span><span class="k">fi</span>
 
+<span class="w">    </span><span class="c1"># ---------- 建仓与 remote（放在提交之前，便于对齐远程已有历史）----------</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span><span class="nv">url</span><span class="o">=</span><span class="s2">""</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="nv">$MODE</span><span class="s2">"</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">"local"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="nv">$MODE</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"https"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">$DRY_RUN</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>info<span class="w"> </span><span class="s2">"检查 / 创建远程仓库 ..."</span>
+<span class="w">            </span>create_repo_api<span class="w"> </span><span class="s2">"</span><span class="nv">$GH_REPO</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VISIBILITY</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>warn<span class="w"> </span><span class="s2">"跳过自动建仓，将直接尝试推送（仓库需已存在）"</span>
+<span class="w">        </span><span class="k">fi</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="nv">$MODE</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"ssh"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span><span class="nv">url</span><span class="o">=</span><span class="s2">"git@github.com:</span><span class="si">${</span><span class="nv">GH_USER</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">GH_REPO</span><span class="si">}</span><span class="s2">.git"</span>
+<span class="w">        </span><span class="k">else</span>
+<span class="w">            </span><span class="nv">url</span><span class="o">=</span><span class="s2">"https://github.com/</span><span class="si">${</span><span class="nv">GH_USER</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">GH_REPO</span><span class="si">}</span><span class="s2">.git"</span>
+<span class="w">        </span><span class="k">fi</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>remote<span class="w"> </span>get-url<span class="w"> </span>origin<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>info<span class="w"> </span><span class="s2">"更新 origin → </span><span class="nv">$url</span><span class="s2">"</span>
+<span class="w">            </span>run<span class="w"> </span>git<span class="w"> </span>remote<span class="w"> </span>set-url<span class="w"> </span>origin<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span>
+<span class="w">        </span><span class="k">else</span>
+<span class="w">            </span>info<span class="w"> </span><span class="s2">"添加 origin → </span><span class="nv">$url</span><span class="s2">"</span>
+<span class="w">            </span>run<span class="w"> </span>git<span class="w"> </span>remote<span class="w"> </span>add<span class="w"> </span>origin<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span>
+<span class="w">        </span><span class="k">fi</span>
+
+<span class="w">        </span><span class="c1"># 远程若已有初始提交（建仓时勾了 README 就会这样），把本地接到它上面，</span>
+<span class="w">        </span><span class="c1"># 避免 unrelated histories / non-fast-forward 报错。</span>
+<span class="w">        </span><span class="c1"># 仅在本地还没有任何提交时执行，绝不会覆盖已有历史。</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$DRY_RUN</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span>HEAD<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span>git_fetch_remote<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">                </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span>origin/main<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">                    </span>git<span class="w"> </span>reset<span class="w"> </span>--soft<span class="w"> </span>origin/main
+<span class="w">                    </span>ok<span class="w"> </span><span class="s2">"已对齐远程 main 历史（本次提交将作为它的后继）"</span>
+<span class="w">                </span><span class="k">fi</span>
+<span class="w">            </span><span class="k">fi</span>
+<span class="w">        </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">fi</span>
+
 <span class="w">    </span><span class="c1"># ---------- 提交 ----------</span>
 <span class="w">    </span>run<span class="w"> </span>git<span class="w"> </span>add<span class="w"> </span>-A
 
@@ -2258,30 +2332,6 @@ main<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'  git remote add origin https://github.com/&lt;你的用户名&gt;/&lt;仓库名&gt;.git\n'</span>
 <span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'  git push -u origin main\n'</span>
 <span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
-<span class="w">    </span><span class="k">fi</span>
-
-<span class="w">    </span><span class="c1"># ---------- 建仓 ----------</span>
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="nv">$MODE</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"https"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$DRY_RUN</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">            </span>info<span class="w"> </span><span class="s2">"检查 / 创建远程仓库 ..."</span>
-<span class="w">            </span>create_repo_api<span class="w"> </span><span class="s2">"</span><span class="nv">$GH_REPO</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VISIBILITY</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>warn<span class="w"> </span><span class="s2">"跳过自动建仓，将直接尝试推送（仓库需已存在）"</span>
-<span class="w">        </span><span class="k">fi</span>
-<span class="w">    </span><span class="k">fi</span>
-
-<span class="w">    </span><span class="c1"># ---------- 配置 remote ----------</span>
-<span class="w">    </span><span class="nb">local</span><span class="w"> </span>url
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="nv">$MODE</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"ssh"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">        </span><span class="nv">url</span><span class="o">=</span><span class="s2">"git@github.com:</span><span class="si">${</span><span class="nv">GH_USER</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">GH_REPO</span><span class="si">}</span><span class="s2">.git"</span>
-<span class="w">    </span><span class="k">else</span>
-<span class="w">        </span><span class="nv">url</span><span class="o">=</span><span class="s2">"https://github.com/</span><span class="si">${</span><span class="nv">GH_USER</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">GH_REPO</span><span class="si">}</span><span class="s2">.git"</span>
-<span class="w">    </span><span class="k">fi</span>
-
-<span class="w">    </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>remote<span class="w"> </span>get-url<span class="w"> </span>origin<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">        </span>info<span class="w"> </span><span class="s2">"更新 origin → </span><span class="nv">$url</span><span class="s2">"</span>
-<span class="w">        </span>run<span class="w"> </span>git<span class="w"> </span>remote<span class="w"> </span>set-url<span class="w"> </span>origin<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span>
-<span class="w">    </span><span class="k">else</span>
-<span class="w">        </span>info<span class="w"> </span><span class="s2">"添加 origin → </span><span class="nv">$url</span><span class="s2">"</span>
-<span class="w">        </span>run<span class="w"> </span>git<span class="w"> </span>remote<span class="w"> </span>add<span class="w"> </span>origin<span class="w"> </span><span class="s2">"</span><span class="nv">$url</span><span class="s2">"</span>
 <span class="w">    </span><span class="k">fi</span>
 
 <span class="w">    </span><span class="c1"># ---------- 最终确认 ----------</span>
@@ -2313,7 +2363,9 @@ main<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'\n排查建议：\n'</span>
 <span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'  1. Token 是否勾选了 repo 权限、是否过期\n'</span>
 <span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'  2. 仓库名是否与 GitHub 上一致（大小写敏感）\n'</span>
-<span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'  3. 若报 non-fast-forward，先执行: git pull --rebase origin main\n'</span>
+<span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'  3. 若报 non-fast-forward / unrelated histories，说明远程已有提交：\n'</span>
+<span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'     git fetch origin main &amp;&amp; git log --oneline origin/main   # 先看清远程内容\n'</span>
+<span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'     git pull --rebase --allow-unrelated-histories origin main # 再合并\n'</span>
 <span class="w">        </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'  4. 网络受限可配置代理: git config --global http.proxy http://127.0.0.1:7890\n'</span>
 <span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="s2">"</span><span class="nv">$rc</span><span class="s2">"</span>
 <span class="w">    </span><span class="k">fi</span>
