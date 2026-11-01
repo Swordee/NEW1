@@ -1,0 +1,12 @@
+# ShellCheck 全局配置（本地与 CI 共用）
+# 文档: https://github.com/koalaman/shellcheck/wiki
+
+# 按 bash 语法检查（脚本 shebang 已是 bash）
+shell=bash
+
+# 只报告 info 及以上（error / warning / info），隐藏 style 纯风格噪声
+# 注意：SC2086（变量未加引号）属于 info，若设为 warning 会被漏掉，故用 info
+severity=info
+
+# 忽略：SC1091 无法跟随外部 source 文件
+disable=SC1091

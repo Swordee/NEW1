@@ -1,0 +1,5 @@
+# 统一使用 LF，避免 Windows 检出后 Shell 脚本出现 CRLF 导致 bad interpreter
+*.sh   text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf

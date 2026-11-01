@@ -1,0 +1,36 @@
+name: ShellCheck
+
+# 触发条件：推送到主分支，以及所有 Pull Request
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck --version
+
+      - name: 运行检查脚本
+        run: |
+          chmod +x scripts/ci-shellcheck.sh
+          ./scripts/ci-shellcheck.sh
+
+      - name: 校验 install.sh 与源脚本同步
+        run: |
+          chmod +x scripts/build-install.sh
+          ./scripts/build-install.sh
+          if ! git diff --exit-code -- install.sh; then
+            echo "::error::install.sh 与 fail2ban-debian.sh 不同步，请重新运行 scripts/build-install.sh 并提交"
+            exit 1
+          fi
