@@ -1,0 +1,139 @@
+name: CI
+
+# 触发：主分支推送、所有 PR、以及手动运行
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支的新提交会取消旧的任务，省 CI 时间
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与 ci.sh 中的默认级别保持一致：style 级必须 0 告警
+  SC_SEVERITY: style
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. 语法 + ShellCheck
+  # ---------------------------------------------------------------------------
+  lint:
+    name: 语法与静态分析
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --version
+
+      - name: bash -n 语法检查
+        run: bash ci.sh --only syntax
+
+      - name: ShellCheck（style 级，要求 0 告警）
+        run: bash ci.sh --only shellcheck
+
+      - name: ShellCheck 严格模式（info 级，仅供参考，不阻塞）
+        continue-on-error: true
+        run: bash ci.sh --only shellcheck --strict
+
+  # ---------------------------------------------------------------------------
+  # 2. 冒烟测试：在多个发行版里真实跑一遍（不需要 root，不动 netfilter）
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: 冒烟测试 (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ "debian:12", "debian:11", "ubuntu:24.04", "ubuntu:22.04" ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 在 ${{ matrix.distro }} 容器中执行 tests/smoke.sh
+        run: |
+          docker run --rm \
+            -v "${PWD}:/src" -w /src \
+            -e TERM=dumb \
+            "${{ matrix.distro }}" \
+            bash -c '
+              set -e
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends \
+                bash coreutils gawk grep sed >/dev/null
+              bash tests/smoke.sh
+            '
+
+  # ---------------------------------------------------------------------------
+  # 3. 安装器：新鲜度、自检、端到端安装
+  # ---------------------------------------------------------------------------
+  installer:
+    name: 安装器一致性
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install.sh 是否与源码同步
+        run: bash scripts/build-install.sh --check
+
+      - name: install.sh 自检（sha256 + 语法 + 版本）
+        run: bash install.sh --check
+
+      - name: 版本一致性
+        run: bash ci.sh --only version
+
+      - name: 端到端安装到临时前缀
+        run: |
+          set -euo pipefail
+          PREFIX="$(mktemp -d)/pfx"
+          sudo bash install.sh --prefix "${PREFIX}"
+          test -x "${PREFIX}/sbin/iptables-wizard"
+          test -L "${PREFIX}/bin/iptables-wizard"
+          "${PREFIX}/bin/iptables-wizard" --version
+          "${PREFIX}/bin/iptables-wizard" --help >/dev/null
+          echo "--- 卸载 ---"
+          sudo bash install.sh --prefix "${PREFIX}" --uninstall
+          test ! -e "${PREFIX}/sbin/iptables-wizard"
+          test ! -e "${PREFIX}/bin/iptables-wizard"
+
+  # ---------------------------------------------------------------------------
+  # 4. 文件规范：LF 换行、无行尾空白、bash shebang
+  # ---------------------------------------------------------------------------
+  hygiene:
+    name: 文件规范
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 换行符 / 行尾空白 / shebang
+        run: |
+          set -uo pipefail
+          fail=0
+          for f in iptables-wizard.sh install.sh ci.sh scripts/*.sh tests/*.sh; do
+            [ -f "$f" ] || continue
+            if grep -qU $'\r' "$f"; then
+              echo "::error file=${f}::包含 CRLF 换行，Linux 下会导致 bash 解析异常"
+              fail=1
+            fi
+            if grep -nE '[[:space:]]+$' "$f" >/tmp/tw.txt; then
+              echo "::error file=${f}::存在行尾空白（共 $(wc -l </tmp/tw.txt) 行）"
+              head -n 5 /tmp/tw.txt
+              fail=1
+            fi
+            if ! head -n 1 "$f" | grep -q '^#!/usr/bin/env bash$'; then
+              echo "::error file=${f}::首行必须是 #!/usr/bin/env bash"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      - name: 主脚本包含版本号常量
+        run: grep -qE '^readonly VERSION="[0-9]+\.[0-9]+\.[0-9]+"$' iptables-wizard.sh
