@@ -13,7 +13,8 @@
 #    uninstall   卸载
 #    restart     重启服务
 #    reload      重载配置（不中断封禁）
-#    status      查看服务状态与封禁列表
+#    status      查看服务状态与封禁列表（含 sshd 生效配置）
+#    info        只查看 sshd 的生效配置
 #    dir         显示关键目录位置
 #    logs        实时跟踪日志
 #    enable      设置开机自启
@@ -168,6 +169,33 @@ _t() {
   else
     "$@"
   fi
+}
+
+# 清理 fail2ban-client 返回的 Python 列表格式：['a', 'b'] -> a, b
+_clean_list() {
+  sed 's/^\[//; s/\]$//' | tr -d "'" \
+    | sed 's/,[[:space:]]*/, /g' | tr -s ' ' \
+    | sed 's/^ //; s/ $//; s/,$//'
+}
+
+# 打印 sshd 的运行时生效参数（合并后的真实值，不是某个文件里的值）
+_show_sshd_config() {
+  command -v fail2ban-client >/dev/null 2>&1 || return 1
+  _t fail2ban-client status sshd >/dev/null 2>&1 || return 1
+
+  section "SSH 封禁规则（运行时生效值）"
+  kv "封禁时长 bantime"  "$(_t fail2ban-client get sshd bantime 2>/dev/null | _clean_list)"
+  kv "统计窗口 findtime" "$(_t fail2ban-client get sshd findtime 2>/dev/null | _clean_list)"
+  kv "最大失败 maxretry" "$(_t fail2ban-client get sshd maxretry 2>/dev/null | _clean_list)"
+  kv "白名单 ignoreip"   "$(_t fail2ban-client get sshd ignoreip 2>/dev/null | _clean_list)"
+  kv "监控日志 logpath"  "$(_t fail2ban-client get sshd logpath 2>/dev/null | _clean_list)"
+  kv "封禁动作"          "$(_t fail2ban-client get sshd actions 2>/dev/null | _clean_list | head -1)"
+
+  echo
+  info "永久修改：编辑 ${F2B_JAIL_LOCAL} 的 [sshd] bantime，再执行 reload"
+  info "临时修改：fail2ban-client set sshd bantime 86400（重启后失效）"
+  info "规则正则：${F2B_CONF_DIR}/filter.d/sshd.conf"
+  return 0
 }
 
 # 非 root 时用 sudo 重新执行自己（保留已解析的参数），避免用户必须记住 sudo。
@@ -808,6 +836,21 @@ do_status() {
     return 1
   fi
   show_status
+  echo
+  _show_sshd_config || true
+}
+
+# 只显示 sshd 的生效配置（不打印完整状态）
+do_info() {
+  if ! command -v fail2ban-client >/dev/null 2>&1; then
+    err "未检测到 fail2ban-client，请先执行 install"
+    return 1
+  fi
+  if ! _show_sshd_config; then
+    warn "sshd jail 未启用或服务未运行，读不到配置"
+    info "先执行 doctor 自检，或查看 fail2ban-client status"
+    return 1
+  fi
 }
 
 # ---------- 7. 显示目录位置 ----------
@@ -846,7 +889,7 @@ do_dir() {
   kv "filter（日志正则）" "${F2B_CONF_DIR}/filter.d/<服务名>.conf"
   info "加载优先级（后者覆盖前者）："
   printf '  %s\n' "jail.conf  →  jail.d/*.conf  →  jail.local  →  jail.d/*.local"
-  info "看某项最终生效值：fail2ban-client get sshd port"
+  info "看生效值：fail2ban-client get sshd bantime / maxretry / findtime"
 }
 
 # ---------- 8. 查看日志 ----------
@@ -909,7 +952,8 @@ Fail2ban 一键管理脚本（Debian / Ubuntu）
   uninstall   卸载
   restart     重启服务
   reload      重载配置（不中断封禁）
-  status      查看服务状态与封禁列表
+  status      查看服务状态与封禁列表（含 sshd 生效配置）
+  info        只查看 sshd 的生效配置（bantime/findtime/maxretry/白名单/动作）
   dir         显示关键目录位置
   logs        实时跟踪日志
   enable      设置开机自启
@@ -1165,6 +1209,7 @@ main() {
     restart)     do_restart ;;
     reload)      do_reload ;;
     status)      do_status ;;
+    info|config) do_info ;;
     dir)         do_dir ;;
     logs)        do_logs ;;
     enable)      do_enable ;;

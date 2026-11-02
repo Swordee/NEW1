@@ -28,7 +28,7 @@ fail2ban/
 在服务器上直接执行（普通用户即可，脚本会自己 `sudo`）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.4/fail2ban/install.sh | bash
 ```
 
 它会依次自动完成，**全程只需最后在面板里点数字**：
@@ -136,7 +136,7 @@ GITHUB_TOKEN=ghp_xxx ./scripts/fetch-private.sh --dest ./src
 
 ```bash
 # 固定版本（推荐，内容不可变，不受 CDN 缓存影响）
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.4/fail2ban/install.sh \
   | bash -s -- install --port 2222 -y
 
 # 跟随 main（会被 CDN 缓存，实测可能数天不更新，不建议用于生产）
@@ -146,11 +146,11 @@ curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh \
 
 | 用途 | 地址 |
 |------|------|
-| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/install.sh` |
+| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.4/fail2ban/install.sh` |
 | 最新 main | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh` |
-| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/` |
+| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.4/fail2ban/` |
 
-说明：`@v1.0.3` 是标签，内容固定、**不受缓存影响**，请优先使用。
+说明：`@v1.0.4` 是标签，内容固定、**不受缓存影响**，请优先使用。
 `@main` 会随分支更新，但 jsDelivr 对分支有较长缓存（实测主动 purge 后仍可能返回旧内容），
 因此不要把它当"最新版"依赖；急用时在 URL 后加 `?t=时间戳` 也未必生效。
 
@@ -165,7 +165,8 @@ sudo fail2ban-tool                     # 打开交互面板（装好后随时可
 ./fail2ban-debian.sh uninstall         # 卸载
 sudo ./fail2ban-debian.sh restart      # 重启
 sudo ./fail2ban-debian.sh reload       # 重载配置
-sudo ./fail2ban-debian.sh status       # 状态 / 封禁列表
+sudo ./fail2ban-debian.sh status       # 状态 / 封禁列表（含 sshd 生效配置）
+sudo ./fail2ban-debian.sh info         # 只看 sshd 生效配置与封禁时长
 sudo ./fail2ban-debian.sh dir          # 关键目录位置
 sudo ./fail2ban-debian.sh logs         # 实时日志
 sudo ./fail2ban-debian.sh enable       # 开机自启
@@ -284,7 +285,7 @@ jail.conf  →  jail.d/*.conf  →  jail.local  →  jail.d/*.local
 
 ```bash
 sudo fail2ban-tool dir          # 打印全部路径与实际文件列表
-sudo fail2ban-client get sshd port   # 看最终生效值
+sudo fail2ban-client get sshd bantime   # 看封禁时长等生效值
 ```
 
 完整说明（含新建规则的完整示例、Debian 12 的 nftables/systemd 差异）见

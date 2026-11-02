@@ -107,11 +107,15 @@ sudo systemctl status fail2ban
 看最终生效值（比翻文件可靠）：
 
 ```bash
-sudo fail2ban-client get sshd port
-sudo fail2ban-client get sshd maxretry
-sudo fail2ban-client get sshd bantime
-sudo fail2ban-client get sshd findtime
+sudo fail2ban-client get sshd bantime      # 封禁时长（秒）
+sudo fail2ban-client get sshd findtime     # 统计窗口（秒）
+sudo fail2ban-client get sshd maxretry     # 允许失败次数
+sudo fail2ban-client get sshd ignoreip     # 白名单
+sudo fail2ban-client get sshd actions      # 封禁动作；端口在参数里，如 port="ssh"
 ```
+
+> ⚠️ **没有 `get sshd port` 这个命令**（会报 `Invalid command`）。
+> 端口要么看 `get sshd actions` 里的 `port="ssh"`，要么直接看配置文件。
 
 ### 3. 加载顺序：谁覆盖谁
 
@@ -255,6 +259,90 @@ bantime  = 7d
 sudo fail2ban-client reload
 # 或重启服务
 sudo systemctl restart fail2ban
+```
+
+### 5. 查看 SSH 封禁规则、修改封禁时间
+
+#### ① 看当前生效的值（不是配置文件里的值）
+
+```bash
+sudo fail2ban-client status sshd            # 当前封禁列表 + 失败计数
+sudo fail2ban-client get sshd bantime       # 封禁时长（秒）
+sudo fail2ban-client get sshd findtime      # 统计窗口（秒）
+sudo fail2ban-client get sshd maxretry      # 允许失败次数
+sudo fail2ban-client get sshd ignoreip      # 白名单
+sudo fail2ban-client get sshd logpath       # 监控哪些日志
+sudo fail2ban-client get sshd failregex     # 判定"失败"的正则
+sudo fail2ban-client get sshd actions       # 封禁动作（端口也在这里，如 port="ssh"）
+```
+
+被封 IP 及封禁时间：
+
+```bash
+sudo fail2ban-client get sshd banip --with-time
+sudo fail2ban-client banned                 # 所有 jail 的封禁字典
+```
+
+> 为什么要用 `get` 而不是翻文件：同一个参数可能在 `jail.conf`、`jail.d/*.conf`、
+> `jail.local` 里各写了一份，`get` 返回的是**最终合并后真正在跑的值**。
+
+#### ② 规则定义在哪看
+
+| 想看什么 | 去哪看 |
+|----------|--------|
+| 判定"失败"的正则 | `/etc/fail2ban/filter.d/sshd.conf` 的 `failregex` |
+| 阈值、端口、白名单 | `/etc/fail2ban/jail.local` 的 `[sshd]` 段 |
+| Debian 包默认启用项 | `/etc/fail2ban/jail.d/defaults-debian.conf` |
+| 上游默认模板 | `/etc/fail2ban/jail.conf` 的 `[sshd]` |
+
+#### ③ 改封禁时间（bantime）
+
+**永久生效** —— 改配置文件，这是唯一能持久的方式：
+
+```ini
+# /etc/fail2ban/jail.local
+[sshd]
+bantime  = 1d        # 封 1 天
+findtime = 10m       # 10 分钟内的失败才计数
+maxretry = 3         # 失败 3 次就封
+```
+
+```bash
+sudo fail2ban-client reload sshd    # 只重载 sshd，不影响其他 jail
+```
+
+时间写法：
+
+| 写法 | 含义 |
+|------|------|
+| `30m` | 30 分钟 |
+| `1h` | 1 小时 |
+| `1d` | 1 天 |
+| `7d` | 7 天 |
+| `-1` | 永久封禁（谨慎，容易误封自己） |
+
+> `bantime` 写在 `[DEFAULT]` 段对**所有 jail** 生效；写在 `[sshd]` 段只覆盖 sshd。
+> `[sshd]` 的优先级更高。
+
+**临时生效**（只影响本次运行，重启服务后回到配置文件的值）：
+
+```bash
+sudo fail2ban-client set sshd bantime 86400     # 86400 秒 = 1 天
+sudo fail2ban-client set sshd maxretry 5
+```
+
+> ⚠️ 改 `bantime` **不会改变已经封禁的 IP 的剩余时长**——它们仍按封禁时的旧值到期。
+> 想让新值立刻作用于某个 IP，先解封、再让它重新触发：
+
+```bash
+sudo fail2ban-client set sshd unbanip 203.0.113.5
+sudo fail2ban-client unban --all        # 或一次解封全部
+```
+
+#### ④ 一条命令看全（本工具）
+
+```bash
+sudo fail2ban-tool info     # 打印 sshd 的 bantime/findtime/maxretry/白名单/动作
 ```
 
 ---
