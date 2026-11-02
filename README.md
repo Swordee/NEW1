@@ -8,9 +8,32 @@
 
 | 分类 | 说明 | 入口 |
 | --- | --- | --- |
-| **Debian SSH** | 安全更换 SSH 端口：交互式脚本、过渡期保留旧端口、校验失败自动回滚 | [进入分类](https://github.com/Swordee/NEW1/tree/main/Debian%20SSH) |
+| **Debian SSH** | 安全更换 SSH 端口：交互式面板、过渡期保留旧端口、校验失败自动回滚 | [进入分类](https://github.com/Swordee/NEW1/tree/main/Debian%20SSH) |
 | **iptables** | iptables 防火墙一键管理，纯 Bash 无 whiptail 依赖，变更前自动备份 | [进入分类](https://github.com/Swordee/NEW1/tree/main/iptables) |
 | **fail2ban** | Fail2ban 落地工具集：一键脚本、安装器、中文文档与自定义规则范本 | [进入分类](https://github.com/Swordee/NEW1/tree/main/fail2ban) |
+
+## 三十秒上手（SSH 工具）
+
+一条命令装好，之后在终端输入 `ssh` 就是图形化面板：
+
+```bash
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.5/Debian%20SSH/install.sh" | sudo bash
+source ~/.bashrc
+ssh
+```
+
+```text
+  当前端口  : 22 2222        端口监听 : 22 ✓ 2222 ✓
+  服务状态  : active         配置校验 : 通过
+  ────────────────────────────────────────────────
+  1) 查看 SSH 状态详情     5) 防火墙规则
+  2) 更改 SSH 端口         6) 重启 SSH 服务
+  3) 移除旧端口            7) 查看操作日志
+  4) 备份与回滚            8) 卸载本工具
+```
+
+> `ssh` → 打开面板；`ssh user@host` → 仍是原生 SSH 客户端，行为不变。
+> 本工具不会替换 `/usr/bin/ssh`，卸载时自动清理别名与软链。
 
 ## 快速取用
 
@@ -82,7 +105,7 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 ### jsDelivr 使用注意
 
 - 路径格式：`https://cdn.jsdelivr.net/gh/<用户>/<仓库>@<分支或标签>/<文件路径>`
-- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.4`（本仓库已打此标签）
+- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.5`（本仓库已打此标签）
 - 无 tag 时 `data.jsdelivr.com/v1/packages/gh/<用户>/<仓库>` 会返回 404；**即使打了 tag 也可能仍返回 404**，不影响文件访问，可忽略
 - 单文件上限 **20 MB**（本项目最大文件 `代码展示.html` 约 240 KB，无压力）
 - 内容有缓存，更新后可能延迟数分钟；可访问 `https://purge.jsdelivr.net/gh/Swordee/NEW1@main/<路径>` 强制刷新
@@ -106,6 +129,7 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 <分类名>/
 ├── README.md          分类说明与快速开始
 ├── <主脚本>.sh        核心工具
+├── ssh_menu.sh        交互式面板（Debian SSH 分类）
 ├── install.sh         自解压安装器（curl | bash）
 ├── 文档 / 规则模板
 └── scripts/           打包与 CI 辅助脚本
@@ -113,7 +137,7 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 
 - 脚本统一用 `bash -n` + ShellCheck（style 级）校验，CI 在 GitHub Actions 上自动运行
 - 修改类脚本默认「先备份 → 再改 → 校验 → 失败自动回滚」
-- 所有脚本面向 Debian 10 / 11 / 12，需要 root 权限
+- 所有脚本**仅面向 Linux**（Debian 10 / 11 / 12），需要 root 权限
 
 ## 代码检查
 

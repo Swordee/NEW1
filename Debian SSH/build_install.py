@@ -20,12 +20,14 @@ ROOT = os.path.dirname(HERE)
 
 TEMPLATE = os.path.join(HERE, "install.template")
 OUTPUT = os.path.join(HERE, "install.sh")
-INSTALLER_VERSION = "1.0.0"
+INSTALLER_VERSION = "1.1.0"
 
 # (源文件相对仓库根的路径, 包内名称)
 FILES = [
     (f"{CATEGORY}/change_ssh_port.sh", "change_ssh_port.sh"),
     (f"{CATEGORY}/remove_old_ssh_port.sh", "remove_old_ssh_port.sh"),
+    (f"{CATEGORY}/ssh_menu.sh", "ssh_menu.sh"),
+    (f"{CATEGORY}/ssh-port.sh", "ssh-port.sh"),
     (f"{CATEGORY}/check.sh", "check.sh"),
     (".shellcheckrc", ".shellcheckrc"),
     (f"{CATEGORY}/README.md", "README.md"),
@@ -43,6 +45,8 @@ def build_tarball() -> bytes:
             info = tar.gettarinfo(path, arcname=arc)
             info.uid = info.gid = 0
             info.uname = info.gname = "root"
+            # .sh 统一带可执行位，避免解压后依赖后续 chmod
+            info.mode = 0o755 if arc.endswith(".sh") else 0o644
             with open(path, "rb") as fh:
                 tar.addfile(info, fh)
     return buf.getvalue()

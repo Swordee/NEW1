@@ -16,12 +16,19 @@
 #   -d, --dir DIR     安装目录（默认 /opt/ssh-port-tools）
 #   -y, --yes         非交互，全部使用默认值
 #       --run         安装完成后立即运行「更换端口」脚本
+#       --menu        安装完成后直接打开交互面板（推荐）
+#       --no-alias    不向 ~/.bashrc / ~/.zshrc 注入 ssh 别名
 #       --no-doc      不安装文档（README / 使用文档）
 #       --uninstall   卸载（删除安装目录与命令软链）
 #   -V, --version     显示版本
 #   -h, --help        显示帮助
 #
 # 注意：修改 SSH 端口需要 root，请用 sudo 执行。
+#
+# 远程一键安装（推荐）：
+#   curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.5/Debian%20SSH/install.sh | sudo bash
+#
+# 安装完成后，终端里直接输入 ssh 即可打开交互面板。
 
 set -euo pipefail
 
@@ -64,10 +71,15 @@ Debian SSH 端口更换工具 · 自解压安装器 v${VERSION}
   -d, --dir DIR     安装目录（默认 ${DEFAULT_DIR}）
   -y, --yes         非交互，全部使用默认值
       --run         安装完成后立即运行「更换端口」脚本
+      --menu        安装完成后直接打开交互面板（推荐）
+      --no-alias    不向 ~/.bashrc / ~/.zshrc 注入 ssh 别名
       --no-doc      不安装文档
       --uninstall   卸载
   -V, --version     显示版本
   -h, --help        显示帮助
+
+安装完成后，在终端里直接输入 ssh 即可打开交互式管理面板；
+带参数的用法（ssh user@host）仍由原生 SSH 客户端处理，行为不变。
 EOF
 }
 
@@ -77,6 +89,8 @@ ASSUME_YES=0
 RUN_AFTER=0
 NO_DOC=0
 DO_UNINSTALL=0
+NO_ALIAS=0
+MENU_AFTER=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -85,6 +99,8 @@ while [[ $# -gt 0 ]]; do
             DIR="$2"; shift 2 ;;
         -y|--yes)     ASSUME_YES=1; shift ;;
         --run)        RUN_AFTER=1; shift ;;
+        --menu)       MENU_AFTER=1; shift ;;
+        --no-alias)   NO_ALIAS=1; shift ;;
         --no-doc)     NO_DOC=1; shift ;;
         --uninstall)  DO_UNINSTALL=1; shift ;;
         -V|--version) echo "install.sh v${VERSION} (built ${BUILD_DATE})"; exit 0 ;;
@@ -124,6 +140,11 @@ decode_payload() {
     printf '%s' "$PAYLOAD_B64" | base64 -D 2>/dev/null | tar -xzf - -C "$dest" 2>/dev/null
 }
 
+# 创建临时目录（仅面向 Linux：mktemp -d 返回标准 POSIX 路径）
+make_tmpdir() {
+    mktemp -d
+}
+
 verify_payload() {
     local dest="$1" line sum name actual fail=0
     while IFS= read -r line; do
@@ -144,18 +165,86 @@ verify_payload() {
     return "$fail"
 }
 
+# ---------- 别名注入 ----------
+ALIAS_BEGIN="# >>> ssh-port-tool >>>"
+ALIAS_END="# <<< ssh-port-tool <<<"
+
+# alias 块内容：只对交互式 shell 生效，且带参数的 ssh 仍走原生客户端
+alias_block() {
+    cat <<EOF
+${ALIAS_BEGIN}
+# Debian SSH 端口管理工具：直接输入 ssh 打开交互面板
+# 带参数时（ssh user@host）仍由原生 SSH 客户端处理，行为不变
+# 如需完全绕过别名：command ssh user@host
+alias ssh='ssh-port'
+${ALIAS_END}
+EOF
+}
+
+# 向指定 rc 文件注入 alias 块（幂等：已存在则先移除旧块）
+inject_alias() {
+    local rc="$1"
+    [[ -n "$rc" ]] || return 0
+    # 只处理真实存在的 rc 文件，避免凭空创建 .bashrc
+    [[ -f "$rc" ]] || return 0
+    # 已存在旧块 → 先删除，保证幂等
+    if grep -qF "$ALIAS_BEGIN" "$rc" 2>/dev/null; then
+        sed -i "\|^${ALIAS_BEGIN}\$|,\|^${ALIAS_END}\$|d" "$rc" 2>/dev/null || true
+    fi
+    printf '\n%s\n' "$(alias_block)" >> "$rc"
+}
+
+remove_alias() {
+    local rc
+    for rc in "$@"; do
+        [[ -f "$rc" ]] || continue
+        if grep -qF "$ALIAS_BEGIN" "$rc" 2>/dev/null; then
+            sed -i "\|^${ALIAS_BEGIN}\$|,\|^${ALIAS_END}\$|d" "$rc" 2>/dev/null || true
+            ok "已清理别名配置：$rc"
+        fi
+    done
+}
+
+install_alias() {
+    local target_home="${SUDO_USER:-$HOME}"
+    [[ -n "$target_home" ]] || target_home="$HOME"
+
+    # 当前登录用户 + root，各家 shell 配置都处理
+    local homes=() rc
+    homes+=("$target_home")
+    if [[ "$target_home" != "/root" ]]; then
+        homes+=("/root")
+    fi
+
+    local home
+    for home in "${homes[@]}"; do
+        [[ -d "$home" ]] || continue
+        for rc in "$home/.bashrc" "$home/.zshrc"; do
+            inject_alias "$rc"
+        done
+    done
+
+    ok "已注入 ssh 别名（重新打开终端或执行 source ~/.bashrc 生效）"
+}
+
 # ---------- 安装 / 卸载 ----------
 do_install() {
     [[ -n "$DIR" && "$DIR" != "/" ]] || die "安装目录非法: '$DIR'"
     mkdir -p "$DIR" || die "无法创建目录 $DIR"
 
     local tmp
-    tmp="$(mktemp -d)" || die "无法创建临时目录"
+    tmp="$(make_tmpdir)" || die "无法创建临时目录"
     # shellcheck disable=SC2064
     trap "rm -rf '$tmp'" EXIT
 
     info "解压安装包 ..."
     decode_payload "$tmp" || die "解压失败（base64/tar 不可用？）"
+
+    # 解压结果自检：核心脚本必须到位
+    local core
+    for core in change_ssh_port.sh remove_old_ssh_port.sh ssh_menu.sh ssh-port.sh; do
+        [[ -f "$tmp/$core" ]] || die "解压结果不完整，缺少 $core"
+    done
 
     info "校验文件完整性 ..."
     verify_payload "$tmp" || die "完整性校验失败，已中止"
@@ -163,9 +252,12 @@ do_install() {
     info "安装到 $DIR ..."
     cp -f "$tmp/change_ssh_port.sh"     "$DIR/" || die "复制 change_ssh_port.sh 失败"
     cp -f "$tmp/remove_old_ssh_port.sh" "$DIR/" || die "复制 remove_old_ssh_port.sh 失败"
+    cp -f "$tmp/ssh_menu.sh"            "$DIR/" || die "复制 ssh_menu.sh 失败"
+    cp -f "$tmp/ssh-port.sh"            "$DIR/" || die "复制 ssh-port.sh 失败"
     cp -f "$tmp/check.sh"               "$DIR/" || die "复制 check.sh 失败"
     cp -f "$tmp/.shellcheckrc"          "$DIR/" 2>/dev/null || true
-    chmod 755 "$DIR/change_ssh_port.sh" "$DIR/remove_old_ssh_port.sh" "$DIR/check.sh"
+    chmod 755 "$DIR/change_ssh_port.sh" "$DIR/remove_old_ssh_port.sh" \
+             "$DIR/ssh_menu.sh" "$DIR/ssh-port.sh" "$DIR/check.sh"
 
     if [[ $NO_DOC -eq 0 ]]; then
         cp -f "$tmp/README.md"   "$DIR/" 2>/dev/null || true
@@ -177,22 +269,50 @@ do_install() {
     if [[ -d /usr/local/bin && -w /usr/local/bin ]]; then
         ln -sf "$DIR/change_ssh_port.sh"     /usr/local/bin/ssh-port-change
         ln -sf "$DIR/remove_old_ssh_port.sh" /usr/local/bin/ssh-port-remove
-        ok "已创建命令：ssh-port-change / ssh-port-remove"
+        ln -sf "$DIR/ssh-port.sh"            /usr/local/bin/ssh-port
+        ln -sf "$DIR/ssh_menu.sh"            /usr/local/bin/ssh-port-menu
+        ok "已创建命令：ssh-port / ssh-port-menu / ssh-port-change / ssh-port-remove"
     else
         warn "未创建 /usr/local/bin 软链（目录不可写）"
     fi
 
+    # 别名注入
+    if [[ $NO_ALIAS -eq 0 ]]; then
+        install_alias
+    else
+        info "已跳过 ssh 别名注入（--no-alias）"
+    fi
+
     ok "安装完成：$DIR"
     echo
-    echo "使用方式："
-    echo "  sudo bash $DIR/change_ssh_port.sh"
-    echo "  sudo bash $DIR/remove_old_ssh_port.sh"
-    echo "  sudo bash $DIR/check.sh"
+    echo -e "${BOLD}接下来怎么用：${NC}"
+    echo -e "  ${GREEN}ssh${NC}                 打开交互式管理面板（推荐）"
+    echo -e "  ${GREEN}ssh-port-menu${NC}      同上，直接命令"
+    echo -e "  ${GREEN}sudo ssh-port-change${NC}  直接更换端口"
+    echo
+    echo -e "${DIM}提示：重新打开一个终端，或执行 source ~/.bashrc 让别名生效。${NC}"
+    echo -e "${DIM}      带参数用法不受影响：ssh user@host 仍然是原生 SSH 客户端。${NC}"
 }
 
 do_uninstall() {
     [[ -n "$DIR" && "$DIR" != "/" ]] || die "安装目录非法: '$DIR'"
-    rm -f /usr/local/bin/ssh-port-change /usr/local/bin/ssh-port-remove
+    rm -f /usr/local/bin/ssh-port /usr/local/bin/ssh-port-menu \
+          /usr/local/bin/ssh-port-change /usr/local/bin/ssh-port-remove
+
+    local target_home="${SUDO_USER:-$HOME}"
+    local homes=() rc
+    homes+=("${target_home:-/root}")
+    if [[ "${target_home:-/root}" != "/root" ]]; then
+        homes+=("/root")
+    fi
+    local home
+    for home in "${homes[@]}"; do
+        [[ -d "$home" ]] || continue
+        for rc in "$home/.bashrc" "$home/.zshrc"; do
+            remove_alias "$rc"
+        done
+    done
+
     if [[ -d "$DIR" ]]; then
         rm -rf "$DIR"
         ok "已删除 $DIR"
@@ -210,7 +330,7 @@ main() {
     echo
 
     [[ $EUID -eq 0 ]] || die "请使用 root 运行（sudo bash install.sh）"
-    [[ "$(uname -s)" == "Linux" ]] || warn "当前系统非 Linux，可能不适用"
+    [[ "$(uname -s)" == "Linux" ]] || die "本工具仅支持 Linux（Debian/Ubuntu 等）"
     command -v tar    >/dev/null 2>&1 || die "缺少 tar"
     command -v base64 >/dev/null 2>&1 || die "缺少 base64"
 
@@ -228,6 +348,12 @@ main() {
     fi
 
     do_install
+
+    if [[ $MENU_AFTER -eq 1 ]]; then
+        echo
+        info "启动交互式管理面板 ..."
+        exec bash "$DIR/ssh_menu.sh" --menu
+    fi
 
     if [[ $RUN_AFTER -eq 1 ]]; then
         echo

@@ -9,27 +9,37 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE, "代码展示.html")
 
 FILES = [
+    ("ssh_menu.sh", "交互面板 · 输入 ssh 进入", "primary"),
+    ("ssh-port.sh", "命令包装器 · 无参开面板 / 带参转发", "primary"),
     ("change_ssh_port.sh", "主脚本 · 更换 SSH 端口", "primary"),
     ("remove_old_ssh_port.sh", "收尾脚本 · 移除旧端口", "secondary"),
+    ("install.sh", "自解压安装器 · 含 alias 注入", "secondary"),
     ("push-to-github.sh", "推送脚本 · GitHub 一键推送", "secondary"),
 ]
 
 # 本次修复清单
 FIXES = [
-    ("port_listening()", "用 awk 'NR>1' 跳过表头，若某些 ss 版本无表头会漏掉首行端口", "改为直接取第 4 列，表头该列不含端口号自然不匹配"),
+    ("ssh_menu.sh · do_firewall()", "分支条件引用了未定义的 $c，set -u 下会 unbound variable 直接崩溃", "改为只判断 $ans，并补 as_root 提权"),
+    ("ssh_menu.sh · list_backups()", "ls -1t | grep 无法处理特殊字符文件名（SC2010/SC2012）", "改用 find -printf 按 mtime 排序，保留 ls 降级分支"),
+    ("ssh_menu.sh · 防火墙放行", "A && B || C 陷阱：成功时也可能执行 err 分支（SC2015）", "改为显式 if/elif/else"),
+    ("ssh_menu.sh · 卸载", "后台 sleep 删除自身所在目录，脚本可能被提前删掉", "延迟 2 秒 + disown，等脚本退出后再删"),
+    ("install.template · alias 注入", "重复安装会写入多份 alias，污染 rc 文件", "按标记先删后写，保证幂等"),
+    ("install.template · alias 移除", "卸载后 rc 文件残留别名块", "用 sed 按标记范围精确删除，保留其余配置"),
+    ("install.template · 解压自检", "payload 不完整时只报『解压失败』，难以定位", "解压后逐个检查核心脚本是否存在"),
+    ("ssh-port.sh · 真实 ssh 定位", "包装器可能找到指向自身的软链，造成无限递归", "逐个校验 readlink 目标，跳过自身目录"),
+    ("ssh-port.sh · 参数透传", "无参调用原生 ssh 只会打印用法，无法承载面板", "无参开面板，带参 exec 原生客户端"),
+    ("install.template · 平台检查", "非 Linux 上继续安装，后续 systemctl 全部失败", "改为硬性检查，非 Linux 直接拒绝"),
+    ("build_install.py · 权限位", "tar 内脚本为 0666，依赖安装后 chmod 兜底", "打包时按扩展名设置 0755 / 0644"),
+    ("port_listening()", "用 awk NR>1 跳过表头，若某些 ss 版本无表头会漏掉首行端口", "改为直接取第 4 列，表头该列不含端口号自然不匹配"),
     ("apply_config()", "删除 Port 的正则过宽，会误删『# Port forwarding ...』这类注释", "收紧为仅匹配『Port <数字>』（可带行尾注释）"),
     ("handle_includes()", "『grep && hits+=()』在 set -e 下存在返回非零导致退出的风险", "改为 if 判断，规避 errexit"),
-    ("main() 取旧端口", "『head -1』配合 pipefail 可能因 SIGPIPE 返回 141 而误退出", "改为 awk 'NR==1{print; exit}'"),
+    ("main() 取旧端口", "head -1 配合 pipefail 可能因 SIGPIPE 返回 141 而误退出", "改为 awk 'NR==1{print; exit}'"),
     ("sshd -t 失败分支", "手动回滚后 CHANGED 仍为 1，EXIT trap 会二次回滚并重启服务", "回滚后置 CHANGED=0"),
-    ("参数解析 -p", "『shift 2』在缺少参数时会报错退出，提示不友好", "增加参数存在性校验并给出明确提示"),
+    ("参数解析 -p", "shift 2 在缺少参数时会报错退出，提示不友好", "增加参数存在性校验并给出明确提示"),
     ("remove: sed 删除", "带行尾注释的 Port 行删不掉", "允许『# 注释』后缀匹配"),
     ("remove: remain 构建", "『[[ ]] && arr+=()』同样的 set -e 风险", "改为 if 判断"),
-    ("configure_firewall()", "『cmd && ok || err』属于 A && B || C 陷阱，成功时也可能执行 err", "改为显式 if/else（SC2015）"),
-    ("change 监听验证循环", "循环变量 i 未被使用", "改为 for _ in ...（SC2034）"),
-    ("remove 监听验证", "同上，且『[[ ]] && {}』在 set -e 下有风险", "改为 for _ 与 if（SC2034）"),
-    ("prompt() 三处", "『[[ -r /dev/tty ]]』在无终端环境仍为真，重定向失败打印『No such device or address』噪音", "新增 _tty_ok() 用子 shell 实际探测，并用 {} 2>/dev/null 包裹"),
-    ("push: 命令替换", "『x=\"$(prompt ...)\"』失败时 set -e 会静默退出，不给出任何提示", "补『|| x=\"\"』兜底，再显式 die 并给出修复命令"),
-    ("交互读取（两脚本）", "curl | bash 管道执行时 stdin 被脚本自身占用，read 直接读到 EOF", "新增 prompt()，非终端时改从 /dev/tty 读取"),
+    ("prompt() 三处", "『[[ -r /dev/tty ]]』在无终端环境仍为真，重定向失败打印噪音", "新增 _tty_ok() 用子 shell 实际探测"),
+    ("交互读取", "curl | bash 管道执行时 stdin 被脚本自身占用，read 读到 EOF", "新增 prompt()，非终端时改从 /dev/tty 读取"),
     ("非交互保护", "无 tty 且未传端口时，read 循环空转可能死循环", "检测到非交互环境直接提示改用 -p"),
 ]
 
@@ -197,15 +207,15 @@ html_doc = f'''<!DOCTYPE html>
 <header class="hero">
   <div class="wrap">
     <h1>Debian SSH 端口更换工具</h1>
-    <p class="sub">代码展示与审计报告 · v2.4</p>
+    <p class="sub">代码展示与审计报告 · v2.5</p>
     <div class="chips">
-      <span class="chip">交互式 + 半自动</span>
+      <span class="chip">输入 ssh 进交互面板</span>
       <span class="chip">自动备份 / 校验 / 回滚</span>
       <span class="chip">Include 检测</span>
       <span class="chip">端口监听验证</span>
       <span class="chip">ShellCheck 0 告警</span>
       <span class="chip">curl | bash 一键安装</span>
-      <span class="chip">GitHub 一键推送</span>
+      <span class="chip">仅限 Linux</span>
     </div>
   </div>
 </header>
@@ -235,7 +245,7 @@ html_doc = f'''<!DOCTYPE html>
   {''.join(cards_html)}
 
   <footer>
-    由 pygments 生成 · 浅色主题 · 支持离线打开 · 最后更新 2026-10-31
+    由 pygments 生成 · 浅色主题 · 支持离线打开 · 最后更新 2026-11-02
   </footer>
 </div>
 </body>
