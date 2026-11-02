@@ -56,6 +56,7 @@ SERVICE="fail2ban"
 # 管理命令安装位置（可用 F2B_BIN_DIR 覆盖，便于测试）
 BIN_DIR="${F2B_BIN_DIR:-/usr/local/bin}"
 TOOL_NAME="fail2ban-tool"
+SCRIPT_VERSION="1.0.6"
 
 # ---------- 全局状态 ----------
 SSH_PORT=""
@@ -489,6 +490,72 @@ bantime  = 24h
 EOF
 }
 
+# ---------- 已存在 jail.local 的坏配置检查与修复 ----------
+# install 不会覆盖已有的 jail.local，但如果它是旧模板生成的
+# （logpath 指向不存在的文件、banaction 与系统工具不匹配），
+# 服务会直接以 status=255 退出。这里就地修掉这两类问题。
+# 返回 0 表示改过配置。
+repair_existing_jail() {
+  local changed=0 lp p missing ba
+  [ -f "$F2B_JAIL_LOCAL" ] || return 1
+
+  # 1) logpath 指向的文件不存在 → 改 backend = systemd
+  lp=$(jail_get_key sshd logpath)
+  if [ -n "$lp" ]; then
+    missing=1
+    for p in $lp; do
+      [ -f "$p" ] && missing=0
+    done
+    if [ "$missing" -eq 1 ]; then
+      warn "sshd jail 的 logpath 指向不存在的文件：${lp}"
+      info "这是 Debian 12+ 启动失败（status=255）最常见的原因"
+      if confirm "是否改为 backend = systemd 并注释掉 logpath？"; then
+        if jail_set_key sshd backend systemd; then
+          jail_del_key sshd logpath
+          ok "已改为 backend = systemd"
+          changed=1
+        else
+          err "写入 $F2B_JAIL_LOCAL 失败"
+        fi
+      fi
+    fi
+  fi
+
+  # 2) banaction 与系统实际可用的工具不匹配 → 改成 nftables
+  ba=$(jail_get_key DEFAULT banaction)
+  case "$ba" in
+    *iptables*)
+      if ! command -v iptables >/dev/null 2>&1 && command -v nft >/dev/null 2>&1; then
+        warn "banaction = ${ba}，但系统没有 iptables 命令（只有 nft）"
+        if confirm "是否改为 banaction = nftables？"; then
+          if jail_set_key DEFAULT banaction nftables; then
+            ok "已改为 nftables"
+            changed=1
+          fi
+        fi
+      fi ;;
+    *nftables*)
+      if ! command -v nft >/dev/null 2>&1; then
+        warn "banaction = ${ba}，但系统没有 nft 命令（请 apt install nftables）"
+      fi ;;
+  esac
+
+  [ "$changed" -eq 1 ]
+}
+
+# 启动失败时把 journal 里最关键的几行直接打出来，省得用户再翻日志
+_show_start_error() {
+  local out
+  out=$(journalctl -u "$SERVICE" -n 30 --no-pager -o cat 2>/dev/null \
+        | grep -iE 'error|failed|not found|denied|no such' | tail -n 5)
+  if [ -n "$out" ]; then
+    printf '\n%s最近的相关日志：%s\n' "$DIM" "$NC"
+    printf '%s\n' "$out" | sed 's/^/  /'
+  fi
+  info "完整日志：journalctl -u ${SERVICE} -n 50 --no-pager -o cat"
+  info "配置自检：fail2ban-client -t"
+}
+
 # ---------- 1. 安装 ----------
 do_install() {
   need_root install
@@ -515,7 +582,10 @@ do_install() {
       err "写入 $F2B_JAIL_LOCAL 失败"; return 1
     fi
   else
-    warn "已存在 $F2B_JAIL_LOCAL，跳过覆盖（如需修改请手动编辑）"
+    warn "已存在 $F2B_JAIL_LOCAL，跳过覆盖"
+    if repair_existing_jail; then
+      ok "已修复 $F2B_JAIL_LOCAL 中的问题配置"
+    fi
   fi
 
   info "设置开机自启并启动..."
@@ -527,7 +597,8 @@ do_install() {
     ok "Fail2ban 安装并启动成功"
     show_status
   else
-    err "服务启动失败，请查看：journalctl -u $SERVICE -n 50"
+    err "服务启动失败（systemd status=255 表示配置初始化失败）"
+    _show_start_error
     return 1
   fi
 
@@ -566,7 +637,13 @@ do_auto() {
   fi
 
   SUPPRESS_POST_DOCTOR=1
-  do_install || return 1
+  if ! do_install; then
+    SUPPRESS_POST_DOCTOR=0
+    echo
+    warn "安装未成功，转入自检流程继续排查（菜单项叫「自动修复」，这里兜住）"
+    do_doctor
+    return 1
+  fi
   SUPPRESS_POST_DOCTOR=0
 
   echo
@@ -715,7 +792,8 @@ do_doctor() {
       if systemctl start "$SERVICE" >/dev/null 2>&1; then
         ok "服务已启动"; fixed=$((fixed+1))
       else
-        err "启动失败，请查看：journalctl -u $SERVICE -n 50"
+        err "启动失败（status=255 表示配置初始化失败）"
+        _show_start_error
       fi
     fi
   fi
@@ -995,9 +1073,8 @@ do_disable() {
 
 # ---------- 帮助 ----------
 show_help() {
+  printf 'Fail2ban 一键管理脚本 v%s（Debian / Ubuntu）\n\n' "$SCRIPT_VERSION"
   cat <<'EOF'
-Fail2ban 一键管理脚本（Debian / Ubuntu）
-
 用法:
   ./fail2ban-debian.sh <命令> [选项]
   非 root 时会自动通过 sudo 提权重入，无需手动加 sudo。
@@ -1150,7 +1227,8 @@ _panel_status() {
 
 show_menu() {
   printf '\n%s%s%s\n' "$BOLD" "============================================================" "$NC"
-  printf '%s  Fail2ban 管理面板 · Debian / Ubuntu%s\n' "$BOLD" "$NC"
+  printf '%s  Fail2ban 管理面板 · Debian / Ubuntu%s  %sv%s%s\n' \
+    "$BOLD" "$NC" "$DIM" "$SCRIPT_VERSION" "$NC"
   _panel_rule
   _panel_status
   _panel_rule

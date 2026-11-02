@@ -518,7 +518,9 @@ sudo journalctl -u fail2ban -f      # 另开一个窗口观察
 ```
 
 > 用本仓库一键脚本安装的话，v1.0.5 起已自动判断 `auth.log` 是否存在来选择日志后端，
-> 不会再写出这个错误配置。老版本可执行 `sudo fail2ban-tool doctor`，它会检测并交互式修复。
+> 不会再写出这个错误配置。v1.0.6 起 `install` 遇到**已存在**的 `jail.local` 也会先检查
+> `logpath` / `banaction` 是否会导致 255，并询问是否就地修复。
+> 老版本可执行 `sudo fail2ban-tool doctor`，它会检测并交互式修复。
 
 **两个容易踩的坑**
 
