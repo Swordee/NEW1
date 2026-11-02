@@ -53,6 +53,15 @@ log() {
     echo "[$ts] [remove v${SCRIPT_VERSION}] $*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+# 重启 SSH 服务：不同发行版服务名可能是 ssh 或 sshd
+restart_ssh() {
+    systemctl restart ssh  2>/dev/null && return 0
+    systemctl restart sshd 2>/dev/null && return 0
+    service ssh restart    2>/dev/null && return 0
+    service sshd restart   2>/dev/null && return 0
+    return 1
+}
+
 TARGET=""
 ASSUME_YES=0
 DRY_RUN=0
@@ -86,7 +95,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 get_ports() {
-    grep -E '^[[:space:]]*Port[[:space:]]+' "$SSHD_CONFIG" 2>/dev/null | awk '{print $2}' || true
+    # 去重 + 数字排序，避免重复 Port 行导致"端口数量"判断出错
+    grep -E '^[[:space:]]*Port[[:space:]]+' "$SSHD_CONFIG" 2>/dev/null \
+        | awk '{print $2}' | sort -un || true
 }
 
 port_listening() {
@@ -109,7 +120,7 @@ rollback_if_needed() {
     if [[ $rc -ne 0 && $CHANGED -eq 1 && -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         err "检测到异常，正在回滚 ..."
         cp -p "$BACKUP_FILE" "$SSHD_CONFIG" 2>/dev/null || true
-        systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null || true
+        restart_ssh || true
         err "已回滚。"
         log "ROLLBACK rc=$rc"
     fi
@@ -219,9 +230,11 @@ main() {
 
     # 重启
     info "重启 ssh 服务 ..."
-    if systemctl restart ssh 2>/dev/null; then ok "ssh 已重启。"
-    elif service ssh restart 2>/dev/null; then ok "ssh 已重启（service）。"
-    else err "重启失败，请手动检查（当前会话先别断）。"; fi
+    if restart_ssh; then
+        ok "ssh 服务已重启。"
+    else
+        err "重启失败，请手动检查（当前会话先别断）。"
+    fi
 
     # 验证剩余端口
     sleep 1

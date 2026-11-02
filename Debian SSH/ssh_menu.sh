@@ -145,7 +145,11 @@ svc_status() {
         fi
     fi
     [[ -z "$state" ]] && state="unknown"
-    printf '%s %s' "$state" "$detail"
+    if [[ -n "$detail" ]]; then
+        printf '%s %s' "$state" "$detail"
+    else
+        printf '%s' "$state"
+    fi
 }
 
 firewall_info() {
@@ -280,7 +284,12 @@ show_detail() {
 
     printf '  监听明细    :\n'
     if command -v ss >/dev/null 2>&1; then
-        ss -tlnp 2>/dev/null | grep -E "sshd|:${ports//$'\n'/|}" || printf '    （未找到 sshd 监听记录）\n'
+        # 端口需整体成组匹配，否则 22 会匹配到 2222 这类行
+        local port_pat
+        port_pat="$(printf '%s' "$ports" | tr '\n' '|')"
+        port_pat="${port_pat%|}"
+        ss -tlnp 2>/dev/null | grep -E "sshd|:(${port_pat})[[:space:]]" \
+            || printf '    （未找到 sshd 监听记录）\n'
     else
         printf '    （ss 不可用）\n'
     fi
@@ -357,12 +366,28 @@ do_backup() {
         return 0
     fi
 
-    as_root cp -p "$BACKUP_DIR/$target" "$SSHD_CONFIG" || { err "回滚失败。"; return 1; }
+    # 覆盖前先留存当前配置：若备份本身是坏的，可立即恢复，避免把可用配置覆盖掉
+    local pre="$SSHD_CONFIG.pre-rollback.$$"
+    as_root cp -p "$SSHD_CONFIG" "$pre" 2>/dev/null || true
+    if ! as_root cp -p "$BACKUP_DIR/$target" "$SSHD_CONFIG"; then
+        err "回滚失败：无法写入 $SSHD_CONFIG"
+        as_root rm -f "$pre" 2>/dev/null || true
+        return 1
+    fi
     if as_root sshd -t >/dev/null 2>&1; then
-        as_root systemctl restart ssh 2>/dev/null || as_root service ssh restart 2>/dev/null || true
-        ok "已回滚并重启 SSH 服务。"
+        as_root rm -f "$pre" 2>/dev/null || true
+        if as_root systemctl restart ssh 2>/dev/null \
+            || as_root service ssh restart 2>/dev/null; then
+            ok "已回滚并重启 SSH 服务。"
+        else
+            warn "已回滚，但服务重启失败，请手动检查：systemctl status ssh"
+        fi
     else
-        err "回滚后的配置语法校验失败，请手动检查 $SSHD_CONFIG"
+        # 备份本身是坏的：必须恢复回滚前的配置，否则会把可用配置覆盖成坏的
+        as_root cp -p "$pre" "$SSHD_CONFIG" 2>/dev/null || true
+        as_root rm -f "$pre" 2>/dev/null || true
+        err "该备份的配置语法校验失败，已恢复回滚前的配置。"
+        err "请手动检查备份文件：$BACKUP_DIR/$target"
         return 1
     fi
 }
@@ -406,6 +431,10 @@ do_firewall() {
                 else
                     warn "iptables 放行 ${p}/tcp 失败"
                 fi
+            elif command -v nft >/dev/null 2>&1; then
+                # nft 的规则位置因发行版而异，不自动改，避免把规则插错表/链
+                warn "nftables 需手动放行 ${p}/tcp："
+                printf '      nft add rule inet filter input tcp dport %s accept\n' "$p"
             fi
         done <<< "$ports"
     fi
@@ -422,6 +451,8 @@ do_restart() {
     fi
     if as_root systemctl restart ssh 2>/dev/null; then
         ok "ssh 已重启。"
+    elif as_root systemctl restart sshd 2>/dev/null; then
+        ok "sshd 已重启。"
     elif as_root service ssh restart 2>/dev/null; then
         ok "ssh 已重启（service）。"
     else
@@ -453,7 +484,15 @@ do_logs() {
 
 do_uninstall() {
     printf '\n%s\n' "${BOLD}── 卸载 ──${NC}"
-    warn "将删除安装目录、软链，并从 shell 配置中移除 ssh 别名。"
+
+    # 安全检查：TOOL_DIR 异常时绝不执行 rm -rf
+    if [[ -z "$TOOL_DIR" || "$TOOL_DIR" == "/" || "$TOOL_DIR" == "$HOME" ]]; then
+        err "安装目录异常（${TOOL_DIR:-空}），已中止卸载以防误删。"
+        err "请手动清理，或重新运行 install.sh --uninstall"
+        return 1
+    fi
+
+    warn "将删除安装目录、软链，并从 shell 配置中移除 sshh 别名。"
     printf '  安装目录: %s\n' "$TOOL_DIR"
     local c
     c="$(prompt "$(echo -e "${CYAN}确认卸载？(y/N) ${NC}")")" || c=""
@@ -463,21 +502,40 @@ do_uninstall() {
     fi
 
     # 清理 alias 注入块
-    local rc home
-    for home in "${HOME:-/root}" /root; do
-        [[ -z "$home" ]] && continue
+    # sudo 下 $HOME 是 /root，需反查 SUDO_USER 的真实 home，否则普通用户的配置清不掉
+    local target_home="$HOME" h
+    if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+        if command -v getent >/dev/null 2>&1; then
+            h="$(getent passwd "$SUDO_USER" 2>/dev/null | awk -F: '{print $6; exit}')" || h=""
+        else
+            h="$(awk -F: -v u="$SUDO_USER" '$1==u{print $6; exit}' /etc/passwd 2>/dev/null)" || h=""
+        fi
+        if [[ -n "$h" && -d "$h" ]]; then
+            target_home="$h"
+        fi
+    fi
+
+    local homes=("$target_home") rc home
+    if [[ "$target_home" != "/root" && -d /root ]]; then
+        homes+=("/root")
+    fi
+    for home in "${homes[@]}"; do
         for rc in "$home/.bashrc" "$home/.zshrc"; do
             [[ -f "$rc" ]] || continue
             if grep -q 'ssh-port-tool' "$rc" 2>/dev/null; then
-                sed -i '/^# >>> ssh-port-tool >>>$/,/^# <<< ssh-port-tool <<<$/d' "$rc" 2>/dev/null \
-                    && ok "已清理别名配置：$rc"
+                if sed -i '/^# >>> ssh-port-tool >>>$/,/^# <<< ssh-port-tool <<<$/d' "$rc" 2>/dev/null; then
+                    ok "已清理别名配置：$rc"
+                else
+                    warn "清理别名失败，请手动编辑：$rc"
+                fi
             fi
         done
     done
 
-    # 清理软链
+    # 清理软链（与安装器创建的 4 个保持一致）
     local link
-    for link in /usr/local/bin/ssh-port /usr/local/bin/ssh-port-change /usr/local/bin/ssh-port-remove; do
+    for link in /usr/local/bin/ssh-port /usr/local/bin/ssh-port-menu \
+                /usr/local/bin/ssh-port-change /usr/local/bin/ssh-port-remove; do
         if [[ -L "$link" ]]; then
             rm -f "$link" && ok "已删除软链：$link"
         fi
@@ -485,7 +543,6 @@ do_uninstall() {
 
     # 删除安装目录（脚本自身位于其中，需等脚本退出后再删）
     printf '  安装目录将在本脚本退出后删除：%s\n' "$TOOL_DIR"
-    # 用 nohup 风格的脱离式删除，避免删到当前正在运行的脚本
     ( sleep 2; rm -rf "$TOOL_DIR" ) >/dev/null 2>&1 &
     disown 2>/dev/null || true
     ok "卸载完成。请重新打开终端使别名生效。"

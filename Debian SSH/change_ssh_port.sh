@@ -55,6 +55,15 @@ log() {
     echo "[$ts] [v${SCRIPT_VERSION}] $*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+# 重启 SSH 服务：不同发行版服务名可能是 ssh 或 sshd
+restart_ssh() {
+    systemctl restart ssh  2>/dev/null && return 0
+    systemctl restart sshd 2>/dev/null && return 0
+    service ssh restart    2>/dev/null && return 0
+    service sshd restart   2>/dev/null && return 0
+    return 1
+}
+
 # ---------- 参数 ----------
 NEW_PORT=""
 ASSUME_YES=0
@@ -191,10 +200,13 @@ handle_includes() {
     esac
 
     for f in "${hits[@]}"; do
-        cp -p "$f" "${f}.bak.$(date +%Y%m%d-%H%M%S)"
+        local bak
+        bak="${f}.bak.$(date +%Y%m%d-%H%M%S)"
+        cp -p "$f" "$bak"
+        INCLUDE_BACKUPS+=("${f}|${bak}")
         sed -i -E 's|^([[:space:]]*)(Port[[:space:]]+)|\1#\2|' "$f"
-        ok "已注释 $f 中的 Port 指令（已备份）"
-        log "commented Port in include: $f"
+        ok "已注释 $f 中的 Port 指令（备份：$bak）"
+        log "commented Port in include: $f (backup: $bak)"
     done
 }
 
@@ -240,6 +252,8 @@ configure_firewall() {
 BACKUP_FILE=""
 CHANGED=0
 TMP_BODY=""
+# 被注释掉 Port 的 Include 文件：每项格式 "源文件|备份文件"
+INCLUDE_BACKUPS=()
 
 on_exit() {
     local rc=$?
@@ -247,8 +261,18 @@ on_exit() {
     if [[ $rc -ne 0 && $CHANGED -eq 1 && -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         err "检测到异常，正在回滚 sshd_config ..."
         cp -p "$BACKUP_FILE" "$SSHD_CONFIG" 2>/dev/null || true
-        systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null || true
-        err "已回滚到修改前状态。"
+        # Include 文件同样要还原，否则改动会残留
+        local pair src bak
+        for pair in "${INCLUDE_BACKUPS[@]}"; do
+            src="${pair%%|*}"
+            bak="${pair#*|}"
+            if [[ -f "$bak" ]]; then
+                cp -p "$bak" "$src" 2>/dev/null || true
+                log "restored include: $src"
+            fi
+        done
+        restart_ssh || true
+        err "已回滚到修改前状态（含 Include 文件）。"
         log "ROLLBACK triggered, rc=$rc"
     fi
     # 再清理临时文件
@@ -373,7 +397,7 @@ main() {
         err "配置语法校验失败，回滚 ..."
         cp -p "$BACKUP_FILE" "$SSHD_CONFIG"
         CHANGED=0
-        systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null || true
+        restart_ssh || true
         err "已恢复原配置。"
         log "sshd -t failed, rolled back"
         exit 1
@@ -385,9 +409,11 @@ main() {
 
     # 重启
     info "重启 ssh 服务 ..."
-    if systemctl restart ssh 2>/dev/null; then ok "ssh 已重启。"
-    elif service ssh restart 2>/dev/null; then ok "ssh 已重启（service）。"
-    else err "重启失败，请手动检查（当前会话先别断）。"; fi
+    if restart_ssh; then
+        ok "ssh 服务已重启。"
+    else
+        err "重启失败，请手动检查（当前会话先别断）。"
+    fi
 
     # 验证监听
     sleep 1
