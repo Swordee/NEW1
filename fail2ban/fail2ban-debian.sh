@@ -452,19 +452,38 @@ ignoreip_add() {
 # 生成基础 jail.local（安装与自检共用）
 write_base_jail() {
   mkdir -p "$F2B_CONF_DIR" || return 1
+  local banaction_line="" logpath_line="" backend_line=""
+
+  # 封禁后端必须与系统实际可用的工具一致。
+  # Debian 12+ 默认 nftables，很多精简镜像没有 iptables 命令；
+  # 若写死 iptables-multiport，fail2ban 启动时 action 初始化失败 → status=255。
+  if command -v nft >/dev/null 2>&1; then
+    banaction_line="banaction = nftables"
+  elif command -v iptables >/dev/null 2>&1; then
+    banaction_line="banaction = iptables-multiport"
+  fi
+
+  # 日志来源：有 auth.log 就按文件读，否则走 systemd journal（Debian 12+ 常态）
+  if [ -f "$AUTH_LOG" ]; then
+    logpath_line="logpath  = ${AUTH_LOG}"
+  else
+    backend_line="backend  = systemd"
+  fi
+
   cat > "$F2B_JAIL_LOCAL" <<EOF
 [DEFAULT]
 bantime  = 1h
 findtime = 10m
 maxretry = 5
-banaction = iptables-multiport
+${banaction_line}
 ignoreip = ${IGNORE_IPS}
 
 [sshd]
 enabled  = true
 port     = ${SSH_PORT}
 filter   = sshd
-logpath  = ${AUTH_LOG}
+${logpath_line}
+${backend_line}
 maxretry = 3
 bantime  = 24h
 EOF
@@ -646,6 +665,46 @@ do_doctor() {
       fi
     fi
   fi
+
+  # --- 5.5 封禁后端：banaction 与系统实际工具是否匹配（255 退出的常见原因） ---
+  local ba=""
+  ba=$(jail_get_key DEFAULT banaction)
+  if [ -z "$ba" ] && [ -f "$F2B_CONF_DIR/paths-debian.conf" ]; then
+    ba=$(sed -n 's/^[[:space:]]*banaction[[:space:]]*=[[:space:]]*//p' \
+         "$F2B_CONF_DIR/paths-debian.conf" 2>/dev/null | head -1)
+  fi
+  case "$ba" in
+    *nftables*)
+      if command -v nft >/dev/null 2>&1; then
+        ok "封禁后端 nftables（nft 可用）"
+      else
+        issues=$((issues+1))
+        warn "banaction=$ba，但系统没有 nft 命令，封禁会失败"
+        if confirm "是否安装 nftables？"; then
+          if apt-get install -y nftables >/dev/null 2>&1; then
+            ok "已安装 nftables"; fixed=$((fixed+1))
+          else
+            warn "安装失败，请手动执行：apt install nftables"
+          fi
+        fi
+      fi ;;
+    *iptables*)
+      if command -v iptables >/dev/null 2>&1; then
+        ok "封禁后端 iptables（iptables 可用）"
+      else
+        issues=$((issues+1))
+        warn "banaction=$ba，但系统没有 iptables 命令（Debian 12 默认用 nftables）"
+        if confirm "是否把 banaction 改为 nftables？"; then
+          if jail_set_key DEFAULT banaction nftables; then
+            ok "已改为 nftables"; fixed=$((fixed+1)); cfg_changed=1
+          fi
+        fi
+      fi ;;
+    "")
+      ok "banaction 使用发行版默认值（Debian 12 为 nftables）" ;;
+    *)
+      ok "封禁后端：$ba" ;;
+  esac
 
   # --- 6. 服务是否运行 ---
   if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
