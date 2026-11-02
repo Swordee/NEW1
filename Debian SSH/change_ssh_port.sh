@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# change_ssh_port.sh —— Debian 交互式/半自动 SSH 端口更换脚本 (v2.4)
+# change_ssh_port.sh —— Debian 交互式/半自动 SSH 端口更换脚本 (v2.7)
 #
 # 相对 v1 的改进：
 #   + 支持命令行参数（-p 端口 / -y 自动确认 / --keep-old / --no-firewall / -n 预演）
@@ -19,14 +19,14 @@
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.4"
+readonly SCRIPT_VERSION="2.7"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
 
 # ---------- 颜色 ----------
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
 info() { echo -e "${CYAN}[信息]${NC} $*"; }
 ok()   { echo -e "${GREEN}[完成]${NC} $*"; }

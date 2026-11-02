@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.6)
+# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.7)
 #
 # 用途：
 #   安装完成后，在命令行输入 `sshh` 即可打开本面板（安装器会注入 alias）。
@@ -19,15 +19,15 @@
 
 set -uo pipefail
 
-readonly SCRIPT_VERSION="2.6"
+readonly SCRIPT_VERSION="2.7"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
 
 # ---------- 颜色（NO_COLOR 或非终端时禁用） ----------
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-    CYAN='\033[0;36m'; BLUE='\033[0;34m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+    CYAN=$'\033[0;36m'; BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; NC=$'\033[0m'
 else
     RED=''; GREEN=''; YELLOW=''; CYAN=''; BLUE=''; BOLD=''; DIM=''; NC=''
 fi

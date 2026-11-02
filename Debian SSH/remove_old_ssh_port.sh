@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# remove_old_ssh_port.sh —— 过渡期结束后，安全移除旧 SSH 端口的收尾脚本 (v2.4)
+# remove_old_ssh_port.sh —— 过渡期结束后，安全移除旧 SSH 端口的收尾脚本 (v2.7)
 #
 # 使用场景：
 #   在 change_ssh_port.sh 中选择「临时保留旧端口」后，确认新端口登录正常，
@@ -18,13 +18,13 @@
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.4"
+readonly SCRIPT_VERSION="2.7"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
 info() { echo -e "${CYAN}[信息]${NC} $*"; }
 ok()   { echo -e "${GREEN}[完成]${NC} $*"; }
