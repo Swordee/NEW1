@@ -26,7 +26,7 @@
 # 注意：修改 SSH 端口需要 root，请用 sudo 执行。
 #
 # 远程一键安装（推荐）：
-#   curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.7/Debian%20SSH/install.sh | sudo bash
+#   curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.8/Debian%20SSH/install.sh | sudo bash
 #
 # 安装完成后，终端里输入 sshh 即可打开交互面板（不占用系统 ssh 命令）。
 
@@ -51,10 +51,15 @@ _tty_ok() { { : < /dev/tty; } 2>/dev/null; }
 
 prompt() {
     local __text="$1" __ans=""
+    # 提示必须单独写到 stderr。
+    # 不能用 { read -p ...; } 2>/dev/null：read -p 的提示本身走 stderr，
+    # 会被 2>/dev/null 一起吞掉，表现为"光标停住但没有任何提示"。
     if [[ -t 0 ]]; then
-        read -r -p "$__text" __ans
+        printf '%s' "$__text" >&2
+        read -r __ans
     elif _tty_ok; then
-        { read -r -p "$__text" __ans < /dev/tty; } 2>/dev/null
+        printf '%s' "$__text" >&2
+        read -r __ans < /dev/tty 2>/dev/null || return 1
     else
         return 1
     fi

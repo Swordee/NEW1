@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ssh-port.sh —— Debian SSH 端口工具 · 命令包装器 (v2.7)
+# ssh-port.sh —— Debian SSH 端口工具 · 命令包装器 (v2.8)
 #
 # 行为约定：
 #
@@ -21,7 +21,7 @@
 
 set -uo pipefail
 
-readonly SCRIPT_VERSION="2.7"
+readonly SCRIPT_VERSION="2.8"
 
 # ---------- 定位真实安装目录（跟随软链） ----------
 resolve_dir() {

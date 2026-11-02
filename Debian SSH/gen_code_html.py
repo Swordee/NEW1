@@ -19,6 +19,7 @@ FILES = [
 
 # 本次修复清单
 FIXES = [
+    ("全部脚本 · prompt()", "`{ read -p \"提示\" x; } 2>/dev/null` 把提示（走 stderr）和错误噪音一起丢掉，curl | bash 安装时卡住无提示", "提示改用 printf 单独写 stderr，read 不再带 -p"),
     ("全部脚本 · 颜色变量", "颜色存的是字面量 \\033[0;32m，面板用 printf '%s' 不会解释，终端满屏 \\033[0;36m", "改用 $'\\033[..' 存真实 ESC 字节，printf / echo 都能正确上色"),
     ("install.template · 别名落点", "把 $SUDO_USER 当目录用（它是用户名），sudo 安装时普通用户 rc 被静默跳过，装完 sshh 不生效", "改用 getent passwd 反查真实 home"),
     ("install.template · rc 属主", "sudo 下 sed -i 重建文件，用户 .bashrc 属主变成 root", "写入前后记录并还原属主"),
@@ -200,7 +201,7 @@ html_doc = f'''<!DOCTYPE html>
 <header class="hero">
   <div class="wrap">
     <h1>Debian SSH 端口更换工具</h1>
-    <p class="sub">代码展示与审计报告 · v2.7</p>
+    <p class="sub">代码展示与审计报告 · v2.8</p>
     <div class="chips">
       <span class="chip">输入 sshh 进交互面板</span>
       <span class="chip">自动备份 / 校验 / 回滚</span>

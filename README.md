@@ -17,7 +17,7 @@
 一条命令装好，之后在终端输入 `sshh` 就是图形化面板：
 
 ```bash
-curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.7/Debian%20SSH/install.sh" | sudo bash
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.8/Debian%20SSH/install.sh" | sudo bash
 source ~/.bashrc
 sshh
 ```
@@ -105,7 +105,7 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 ### jsDelivr 使用注意
 
 - 路径格式：`https://cdn.jsdelivr.net/gh/<用户>/<仓库>@<分支或标签>/<文件路径>`
-- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.7`（本仓库已打此标签）
+- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.8`（本仓库已打此标签）
 - 无 tag 时 `data.jsdelivr.com/v1/packages/gh/<用户>/<仓库>` 会返回 404；**即使打了 tag 也可能仍返回 404**，不影响文件访问，可忽略
 - 单文件上限 **20 MB**（本项目最大文件 `代码展示.html` 约 240 KB，无压力）
 - 内容有缓存，更新后可能延迟数分钟；可访问 `https://purge.jsdelivr.net/gh/Swordee/NEW1@main/<路径>` 强制刷新

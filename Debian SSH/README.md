@@ -9,7 +9,7 @@
 
 ```bash
 # 1. 一条命令安装（国内推荐 jsDelivr 线路）
-curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.7/Debian%20SSH/install.sh" | sudo bash
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.8/Debian%20SSH/install.sh" | sudo bash
 
 # 2. 让别名生效（或直接新开一个终端）
 source ~/.bashrc
@@ -22,7 +22,7 @@ sshh
 
 ```text
 ╔══════════════════════════════════════════════════════════════╗
-║   Debian SSH · 端口管理面板                v2.7          ║
+║   Debian SSH · 端口管理面板                v2.8          ║
 ╚══════════════════════════════════════════════════════════════╝
   主机      : root@server · Debian GNU/Linux 12
   当前端口  : 22 2222
@@ -86,7 +86,7 @@ sudo bash change_ssh_port.sh -p 2222 -n              # 预演，不做任何修�
 
 ```bash
 # jsDelivr（国内推荐，按标签锁版本）
-curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.7/Debian%20SSH/install.sh" | sudo bash
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.8/Debian%20SSH/install.sh" | sudo bash
 
 # GitHub 直连
 curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
@@ -107,7 +107,7 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 | `ssh-port-change` | 直接更换端口 |
 | `ssh-port-remove` | 直接移除旧端口 |
 
-想锁定版本可用 jsDelivr 的标签写法：`@v2.7` 代替 `@main`。
+想锁定版本可用 jsDelivr 的标签写法：`@v2.8` 代替 `@main`。
 
 > 📌 加速线路只对 public 仓库生效（本仓库已是 public）。
 > 2026-11-01 实测：**jsDelivr ✅**、GitHub 直连 ✅；`ghproxy.cc` 证书已过期、`mirror.ghproxy.com` TLS 握手失败，二者暂不可用。

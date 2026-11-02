@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.7)
+# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.8)
 #
 # 用途：
 #   安装完成后，在命令行输入 `sshh` 即可打开本面板（安装器会注入 alias）。
@@ -19,7 +19,7 @@
 
 set -uo pipefail
 
-readonly SCRIPT_VERSION="2.7"
+readonly SCRIPT_VERSION="2.8"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
@@ -42,10 +42,15 @@ _tty_ok() { { : < /dev/tty; } 2>/dev/null; }
 
 prompt() {
     local __text="$1" __ans=""
+    # 提示必须单独写到 stderr。
+    # 不能用 { read -p ...; } 2>/dev/null：read -p 的提示本身走 stderr，
+    # 会被 2>/dev/null 一起吞掉，表现为"光标停住但没有任何提示"。
     if [[ -t 0 ]]; then
-        read -r -p "$__text" __ans
+        printf '%s' "$__text" >&2
+        read -r __ans
     elif _tty_ok; then
-        { read -r -p "$__text" __ans < /dev/tty; } 2>/dev/null
+        printf '%s' "$__text" >&2
+        read -r __ans < /dev/tty 2>/dev/null || return 1
     else
         return 1
     fi

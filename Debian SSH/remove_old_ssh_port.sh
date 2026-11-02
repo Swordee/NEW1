@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# remove_old_ssh_port.sh —— 过渡期结束后，安全移除旧 SSH 端口的收尾脚本 (v2.7)
+# remove_old_ssh_port.sh —— 过渡期结束后，安全移除旧 SSH 端口的收尾脚本 (v2.8)
 #
 # 使用场景：
 #   在 change_ssh_port.sh 中选择「临时保留旧端口」后，确认新端口登录正常，
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.7"
+readonly SCRIPT_VERSION="2.8"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
@@ -38,10 +38,15 @@ _tty_ok() { { : < /dev/tty; } 2>/dev/null; }
 
 prompt() {
     local __text="$1" __ans=""
+    # 提示必须单独写到 stderr。
+    # 不能用 { read -p ...; } 2>/dev/null：read -p 的提示本身走 stderr，
+    # 会被 2>/dev/null 一起吞掉，表现为"光标停住但没有任何提示"。
     if [[ -t 0 ]]; then
-        read -r -p "$__text" __ans
+        printf '%s' "$__text" >&2
+        read -r __ans
     elif _tty_ok; then
-        { read -r -p "$__text" __ans < /dev/tty; } 2>/dev/null
+        printf '%s' "$__text" >&2
+        read -r __ans < /dev/tty 2>/dev/null || return 1
     else
         return 1
     fi
