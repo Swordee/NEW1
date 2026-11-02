@@ -39,12 +39,16 @@ B64=$(base64 < "${SRC}")
 #  修改逻辑请改 fail2ban-debian.sh 后重新运行生成器。
 #
 #  本地执行:
-#    ./install.sh                        # 默认执行 install
-#    ./install.sh menu                   # 进入交互菜单
-#    ./install.sh status                 # 查看状态
+#    ./install.sh                        # 默认 bootstrap：装好并进交互面板
+#    ./install.sh menu                   # 直接进入交互面板
+#    ./install.sh doctor                 # 自检并交互式修复
 #
 #  远程一键执行（curl | bash）:
+#    curl -fsSL <url> | bash                        # 装好并进交互面板
 #    curl -fsSL <url> | bash -s -- install --port 2222 --ignore-ip "1.2.3.4/32" -y
+#
+#  权限:
+#    非 root 时由内嵌脚本自动调用 sudo 提权（可加 --no-elevate 关闭）。
 #
 #  引导器选项:
 #    --from-file <路径>   改用本地 fail2ban-debian.sh（开发调试）
@@ -68,6 +72,12 @@ install.sh — Fail2ban 一键安装引导器
 用法:
   curl -fsSL <url> | bash -s -- [命令] [选项]
   ./install.sh [命令] [选项]
+
+不带命令时默认执行 bootstrap：装成系统命令 fail2ban-tool → 自动安装 fail2ban
+→ 直接进入交互面板。非 root 时会自动通过 sudo 提权重入，无需手动加 sudo。
+
+命令（透传给内嵌脚本）:
+  bootstrap / auto / install / doctor / status / dir / logs / reload / uninstall / menu / help
 
 引导器选项:
   --from-file <路径>   使用本地 fail2ban-debian.sh（开发调试用）
@@ -165,10 +175,13 @@ fi
 
 chmod +x "${TMP_SCRIPT}" 2>/dev/null || true
 
-# 无参数时默认执行 install
+# 无参数时默认执行 bootstrap（一条命令装好并进入交互面板）
 if [ "${#PASS_ARGS[@]}" -eq 0 ]; then
-  PASS_ARGS=(install)
+  PASS_ARGS=(bootstrap)
 fi
+
+# 让内嵌脚本的错误提示显示 install.sh，而不是临时解压路径
+export F2B_PROG_HINT="install.sh"
 
 # curl | bash 时 stdin 是管道，交互输入改从 /dev/tty 读取
 if { : < /dev/tty; } 2>/dev/null; then
