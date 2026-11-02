@@ -259,6 +259,44 @@ sudo fail2ban-tool status
 sudo fail2ban-tool doctor
 ```
 
+## 服务起不来（`status=255`）
+
+```text
+Active: failed (Result: exit-code)
+Process: ... ExecStart=/usr/bin/fail2ban-server ... (code=exited, status=255/FAILURE)
+```
+
+`255` 只是 fail2ban-server 配置初始化失败后的退出码，**真正原因在 `journalctl` 上一行**：
+
+```bash
+sudo journalctl -u fail2ban -n 30 --no-pager
+```
+
+最常见的两种：
+
+| 报错 | 原因 | 一行修复 |
+|------|------|----------|
+| `Have not found any log file for sshd jail` | `jail.local` 里写了 `logpath = /var/log/auth.log`，但 Debian 12+ 没有这个文件 | 注释掉 `logpath`，加 `backend = systemd` |
+| `iptables: not found` / `Failed to execute ban action` | `banaction` 写死 iptables，而系统只有 nftables | 改成 `banaction = nftables` |
+
+改完先做语法检查，别直接 restart：
+
+```bash
+sudo fail2ban-client -t && sudo systemctl restart fail2ban
+```
+
+或者直接交给自检（会自动识别并修复这两类问题）：
+
+```bash
+sudo fail2ban-tool doctor
+```
+
+> v1.0.5 起 `install` 生成配置时会自动判断系统有无 `auth.log`、有无 `nft`，
+> 不再产生这两类错误配置。老版本请先更新。
+
+详细排查表（含 filter 缺失、port 写错等）见
+[fail2ban-guide.md](fail2ban-guide.md) 第七节「`status=255` 启动失败专项排查」。
+
 ## 配置文件位置速查
 
 | 用途 | 路径 |
