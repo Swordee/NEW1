@@ -229,12 +229,20 @@ ignoreip = 127.0.0.1/8 ::1 你的固定IP/32
 enabled  = true
 port     = ssh                 # 等价于 22；若改了 SSH 端口，写具体端口号如 2222
 filter   = sshd
-logpath  = /var/log/auth.log   # RHEL 系为 /var/log/secure
 maxretry = 3                   # 比默认值更严格：失败 3 次即封
 bantime  = 24h                 # 封禁 24 小时
 findtime = 10m
-backend  = systemd             # 若系统用 journald 且无日志文件，可改用 systemd
+
+# ↓ 日志来源：二选一，只能留一个
+backend  = systemd             # 方式 A（Debian 12+ / Ubuntu 22.04+ 默认）：读 systemd journal
+# logpath = /var/log/auth.log  # 方式 B：有该文件时才用（RHEL 系为 /var/log/secure）
 ```
+
+> ⚠️ **`logpath` 与 `backend = systemd` 只能留一个。**
+> `logpath` 指向的文件如果不存在，fail2ban 会在启动阶段直接报
+> `ERROR Failed during configuration: Have not found any log file for sshd jail`
+> 然后以 `status=255` 退出 —— 这是 Debian 12+ 上最常见的启动失败原因。
+> 判断方法：`ls -l /var/log/auth.log`，没有这个文件就用方式 A。
 
 > 改了 SSH 端口时务必同步修改 `port`，否则规则不会命中。
 
@@ -432,6 +440,79 @@ sudo rm -f  /var/log/fail2ban.log*
 | 改了 SSH 端口仍被扫 | 同步修改 jail 里的 `port`，然后 `reload` |
 | 重启后规则丢失 | Fail2ban 重启会自动重建封禁，属正常；若需持久需调大 `bantime` |
 | systemd 系统日志路径变化 | jail 中用 `backend = systemd`，无需 `logpath` |
+| 启动失败 `status=255` | 见下方「`status=255` 启动失败专项排查」 |
+
+### 专项：`status=255` 启动失败
+
+**现象**
+
+```text
+# systemctl status fail2ban
+Active: failed (Result: exit-code)
+Process: ... ExecStart=/usr/bin/fail2ban-server ... (code=exited, status=255/FAILURE)
+
+# journalctl -u fail2ban -n 20
+ERROR  Failed during configuration: Have not found any log file for sshd jail
+ERROR  Async configuration of server failed
+ERROR  ERROR: test configuration failed
+```
+
+`255` 是 fail2ban-server 配置初始化失败后主动退出的退出码。**它只是结果，不是原因**，
+真正原因永远写在 `journalctl` 的上一条 `ERROR` 里。按出现频率排序：
+
+| 报错关键字 | 原因 | 修复 |
+|-----------|------|------|
+| `Have not found any log file for sshd jail` | `logpath` 指向的文件不存在（Debian 12+ 默认无 `/var/log/auth.log`） | 删掉 `logpath`，改 `backend = systemd` |
+| `Failed to execute ban jail 'sshd' action ...` / `iptables: not found` | `banaction` 与系统工具不匹配（Debian 12 默认 nftables，可能没有 iptables 命令） | `banaction = nftables` 或 `apt install iptables` |
+| `Unable to read the filter` / `No such file ... filter.d/xxx.conf` | `filter` 名字写错或自定义 filter 未创建 | 检查 `/etc/fail2ban/filter.d/<名字>.conf` |
+| `Invalid port` | `port` 写法错误（空值、多余空格、错误分隔符） | 用逗号分隔，如 `port = 22,2222` |
+
+**修复步骤（日志缺失型，最常见）**
+
+```bash
+# 1. 确认确实没有这个文件
+ls -l /var/log/auth.log
+
+# 2. 备份后修正：注释 logpath，补 backend = systemd
+sudo cp -a /etc/fail2ban/jail.local /etc/fail2ban/jail.local.bak
+sudo awk '
+  /^\[sshd\]/ { print; print "backend  = systemd"; ins=1; next }
+  /^\[/ { ins=0 }
+  ins && /^[[:space:]]*backend[[:space:]]*=/ { next }
+  ins && /^[[:space:]]*logpath[[:space:]]*=/ { print "# " $0; next }
+  { print }
+' /etc/fail2ban/jail.local > /tmp/jl.new && sudo cp /tmp/jl.new /etc/fail2ban/jail.local && rm -f /tmp/jl.new
+
+# 3. 先做配置语法检查（这一步过了再启动，不要盲目 restart）
+sudo fail2ban-client -t
+
+# 4. 启动
+sudo systemctl restart fail2ban
+sudo systemctl status fail2ban --no-pager
+```
+
+**改完的正确形态**
+
+```ini
+[sshd]
+enabled  = true
+port     = 22
+filter   = sshd
+backend  = systemd
+# logpath  = /var/log/auth.log   ← 被注释掉
+maxretry = 3
+bantime  = 24h
+```
+
+**验证真的在监控日志**
+
+```bash
+sudo fail2ban-client status sshd    # 期望 Log file(s) 为 journal 或 -，"Total failed" 会增长
+sudo journalctl -u fail2ban -f      # 另开一个窗口观察
+```
+
+> 用本仓库一键脚本安装的话，v1.0.5 起已自动判断 `auth.log` 是否存在来选择日志后端，
+> 不会再写出这个错误配置。老版本可执行 `sudo fail2ban-tool doctor`，它会检测并交互式修复。
 
 ---
 
@@ -449,7 +530,10 @@ ignoreip = 127.0.0.1/8 ::1
 enabled  = true
 port     = ssh
 filter   = sshd
-logpath  = /var/log/auth.log
 maxretry = 3
 bantime  = 24h
+backend  = systemd
+# logpath = /var/log/auth.log   # 二选一：该文件不存在时不要写这行
 ```
+
+> 若 `ls /var/log/auth.log` 有输出，把上面两行互换（保留 `logpath`、注释掉 `backend`）也可以。
