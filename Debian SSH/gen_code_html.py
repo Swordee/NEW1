@@ -9,7 +9,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE, "代码展示.html")
 
 FILES = [
-    ("ssh_menu.sh", "交互面板 · 输入 ssh 进入", "primary"),
+    ("ssh_menu.sh", "交互面板 · 输入 sshh 进入", "primary"),
     ("ssh-port.sh", "命令包装器 · 无参开面板 / 带参转发", "primary"),
     ("change_ssh_port.sh", "主脚本 · 更换 SSH 端口", "primary"),
     ("remove_old_ssh_port.sh", "收尾脚本 · 移除旧端口", "secondary"),
@@ -19,6 +19,8 @@ FILES = [
 
 # 本次修复清单
 FIXES = [
+    ("install.template · 安装完成提示", "引用了未定义的 ${DIM} 颜色变量，set -u 下安装成功最后一刻崩溃", "补上 DIM 定义，安装流程完整走完"),
+    ("install.template · 别名入口", "alias ssh 占用系统命令名，与脚本/插件里的 ssh 调用冲突", "改为 alias sshh，系统 ssh 完全不受影响"),
     ("ssh_menu.sh · do_firewall()", "分支条件引用了未定义的 $c，set -u 下会 unbound variable 直接崩溃", "改为只判断 $ans，并补 as_root 提权"),
     ("ssh_menu.sh · list_backups()", "ls -1t | grep 无法处理特殊字符文件名（SC2010/SC2012）", "改用 find -printf 按 mtime 排序，保留 ls 降级分支"),
     ("ssh_menu.sh · 防火墙放行", "A && B || C 陷阱：成功时也可能执行 err 分支（SC2015）", "改为显式 if/elif/else"),
@@ -207,9 +209,9 @@ html_doc = f'''<!DOCTYPE html>
 <header class="hero">
   <div class="wrap">
     <h1>Debian SSH 端口更换工具</h1>
-    <p class="sub">代码展示与审计报告 · v2.5</p>
+    <p class="sub">代码展示与审计报告 · v2.6</p>
     <div class="chips">
-      <span class="chip">输入 ssh 进交互面板</span>
+      <span class="chip">输入 sshh 进交互面板</span>
       <span class="chip">自动备份 / 校验 / 回滚</span>
       <span class="chip">Include 检测</span>
       <span class="chip">端口监听验证</span>

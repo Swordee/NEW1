@@ -2,26 +2,27 @@
 
 本分类收录 Debian 系统下 SSH 相关工具与文档，核心目标是**安全地更换 SSH 端口**，避免"改完配置连不上、把自己锁在门外"。
 
-> 一条命令安装，之后在终端直接输入 `ssh` 就能打开交互式管理面板。
+> 一条命令安装，之后在终端输入 `sshh` 就能打开交互式管理面板。
+> 刻意**不占用 `ssh`**，避免与系统命令冲突——原生 `ssh user@host` 行为完全不变。
 
 ## 最快上手（三步）
 
 ```bash
 # 1. 一条命令安装（国内推荐 jsDelivr 线路）
-curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.5/Debian%20SSH/install.sh" | sudo bash
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.6/Debian%20SSH/install.sh" | sudo bash
 
 # 2. 让别名生效（或直接新开一个终端）
 source ~/.bashrc
 
-# 3. 输入 ssh，进入交互面板
-ssh
+# 3. 输入 sshh，进入交互面板
+sshh
 ```
 
 面板长这样，用数字键选择即可：
 
 ```text
 ╔══════════════════════════════════════════════════════════════╗
-║   Debian SSH · 端口管理面板                v2.5          ║
+║   Debian SSH · 端口管理面板                v2.6          ║
 ╚══════════════════════════════════════════════════════════════╝
   主机      : root@server · Debian GNU/Linux 12
   当前端口  : 22 2222
@@ -85,7 +86,7 @@ sudo bash change_ssh_port.sh -p 2222 -n              # 预演，不做任何修�
 
 ```bash
 # jsDelivr（国内推荐，按标签锁版本）
-curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.5/Debian%20SSH/install.sh" | sudo bash
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.6/Debian%20SSH/install.sh" | sudo bash
 
 # GitHub 直连
 curl -fsSL "https://raw.githubusercontent.com/Swordee/NEW1/main/Debian%20SSH/install.sh" | sudo bash
@@ -101,12 +102,12 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 
 | 命令 | 作用 |
 | --- | --- |
-| `ssh` | 打开交互式管理面板（安装器注入了 alias） |
+| `sshh` | 打开交互式管理面板（安装器注入了 alias） |
 | `ssh-port-menu` | 同上，不依赖别名的直接入口 |
 | `ssh-port-change` | 直接更换端口 |
 | `ssh-port-remove` | 直接移除旧端口 |
 
-想锁定版本可用 jsDelivr 的标签写法：`@v2.5` 代替 `@main`。
+想锁定版本可用 jsDelivr 的标签写法：`@v2.6` 代替 `@main`。
 
 > 📌 加速线路只对 public 仓库生效（本仓库已是 public）。
 > 2026-11-01 实测：**jsDelivr ✅**、GitHub 直连 ✅；`ghproxy.cc` 证书已过期、`mirror.ghproxy.com` TLS 握手失败，二者暂不可用。
@@ -118,26 +119,33 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 -y, --yes         非交互，全部使用默认值
     --menu        安装完成后直接打开交互面板
     --run         安装完成后直接运行更换端口
-    --no-alias    不注入 ssh 别名（只装命令，不动 shell 配置）
+    --no-alias    不注入 sshh 别名（只装命令，不动 shell 配置）
     --no-doc      不安装文档
     --uninstall   卸载（同时清理别名与软链）
 ```
 
-## 关于 `ssh` 别名
+## 关于 `sshh` 命令
 
 安装器会在 `~/.bashrc`（及 `~/.zshrc`，若存在）写入一段带标记的配置：
 
 ```bash
 # >>> ssh-port-tool >>>
-alias ssh='ssh-port'
+alias sshh='ssh-port'
 # <<< ssh-port-tool <<<
 ```
 
+| 你输入 | 实际执行 |
+| --- | --- |
+| `sshh` | 打开交互式管理面板 |
+| `sshh user@host` | 转发给原生 SSH 客户端 |
+| `ssh user@host` | 原生 SSH，**完全不受本工具影响** |
+| `ssh-port` / `ssh-port-menu` | 不依赖别名，直接开面板 |
+
+- **不占用 `ssh`**：从 v2.6 起改用 `sshh`，避免与系统命令冲突
 - **幂等**：重复安装不会产生多份配置
 - **可逆**：`--uninstall` 或面板里选「卸载」会精确删除这一段，不动你的其他配置
-- **不破坏原生 ssh**：`ssh user@host` 会被包装器原样转发给 `/usr/bin/ssh`，行为不变
-- **逃生通道**：`command ssh user@host` 或 `/usr/bin/ssh user@host` 完全绕过别名
 - 不想改 shell 配置：安装时加 `--no-alias`，之后用 `ssh-port-menu` 打开面板
+- 装过旧版（占用过 `ssh`）的话，新装会自动替换旧配置块；当前终端执行 `unalias ssh` 即可清除残留
 
 > 本工具**绝不替换 `/usr/bin/ssh`**，原生客户端始终原封不动。
 

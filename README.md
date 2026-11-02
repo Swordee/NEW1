@@ -14,12 +14,12 @@
 
 ## 三十秒上手（SSH 工具）
 
-一条命令装好，之后在终端输入 `ssh` 就是图形化面板：
+一条命令装好，之后在终端输入 `sshh` 就是图形化面板：
 
 ```bash
-curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.5/Debian%20SSH/install.sh" | sudo bash
+curl -fsSL "https://cdn.jsdelivr.net/gh/Swordee/NEW1@v2.6/Debian%20SSH/install.sh" | sudo bash
 source ~/.bashrc
-ssh
+sshh
 ```
 
 ```text
@@ -32,8 +32,8 @@ ssh
   4) 备份与回滚            8) 卸载本工具
 ```
 
-> `ssh` → 打开面板；`ssh user@host` → 仍是原生 SSH 客户端，行为不变。
-> 本工具不会替换 `/usr/bin/ssh`，卸载时自动清理别名与软链。
+> `sshh` → 打开面板；`ssh user@host` → 原生 SSH，完全不受影响。
+> 刻意不占用 `ssh`，避免与系统命令冲突；卸载时自动清理别名与软链。
 
 ## 快速取用
 
@@ -105,7 +105,7 @@ curl -fsSL "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Swordee
 ### jsDelivr 使用注意
 
 - 路径格式：`https://cdn.jsdelivr.net/gh/<用户>/<仓库>@<分支或标签>/<文件路径>`
-- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.5`（本仓库已打此标签）
+- 建议用**标签**代替 `@main`，避免缓存导致内容滞后：`@v2.6`（本仓库已打此标签）
 - 无 tag 时 `data.jsdelivr.com/v1/packages/gh/<用户>/<仓库>` 会返回 404；**即使打了 tag 也可能仍返回 404**，不影响文件访问，可忽略
 - 单文件上限 **20 MB**（本项目最大文件 `代码展示.html` 约 240 KB，无压力）
 - 内容有缓存，更新后可能延迟数分钟；可访问 `https://purge.jsdelivr.net/gh/Swordee/NEW1@main/<路径>` 强制刷新

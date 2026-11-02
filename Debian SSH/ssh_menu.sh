@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.5)
+# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.6)
 #
 # 用途：
-#   安装完成后，在命令行直接输入 `ssh` 即可打开本面板（安装器会注入 alias）。
+#   安装完成后，在命令行输入 `sshh` 即可打开本面板（安装器会注入 alias）。
 #   面板提供：状态查看 / 更换端口 / 移除旧端口 / 防火墙 / 备份回滚 / 重启 / 日志 / 卸载。
 #
 # 用法：
@@ -19,7 +19,7 @@
 
 set -uo pipefail
 
-readonly SCRIPT_VERSION="2.5"
+readonly SCRIPT_VERSION="2.6"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"

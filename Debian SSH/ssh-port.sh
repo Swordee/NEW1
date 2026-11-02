@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
 #
-# ssh-port.sh —— Debian SSH 端口工具 · 命令包装器 (v2.5)
+# ssh-port.sh —— Debian SSH 端口工具 · 命令包装器 (v2.6)
 #
-# 行为约定（关键设计，避免把自己锁在门外）：
+# 行为约定：
 #
 #   ssh-port                    → 打开交互式管理面板（无参数）
 #   ssh-port user@host          → 完全等价于原生 ssh，转发所有参数
 #   ssh-port -p 2222 root@host  → 同上，带端口/选项也照常转发
 #
 # 安装器会向 ~/.bashrc、~/.zshrc 注入：
-#   alias ssh='ssh-port'
+#   alias sshh='ssh-port'
 # 于是：
-#   ssh                → 打开管理面板
-#   ssh root@1.2.3.4  → 仍然是原生 SSH 客户端，行为不变
+#   sshh                → 打开管理面板
+#   sshh root@1.2.3.4   → 转发到原生 SSH 客户端
 #
-# 逃生通道（绕过别名，直接调用原生客户端）：
-#   command ssh root@1.2.3.4
-#   /usr/bin/ssh root@1.2.3.4
+# 设计要点：刻意不占用 ssh 这个名字，避免与系统命令冲突。
+# 系统自带的 ssh 始终原封不动，ssh user@host 行为与安装前完全一致。
 #
-# 注意：本脚本绝不替换 /usr/bin/ssh，原生客户端始终原封不动。
+# 如需绕过别名直接运行面板：ssh-port 或 ssh-port-menu
 
 set -uo pipefail
 
-readonly SCRIPT_VERSION="2.5"
+readonly SCRIPT_VERSION="2.6"
 
 # ---------- 定位真实安装目录（跟随软链） ----------
 resolve_dir() {
@@ -81,17 +80,17 @@ Debian SSH 端口工具包装器 v${SCRIPT_VERSION}
   ssh-port <ssh参数...>    完全等价于原生 ssh（原样透传）
 
 说明:
-  安装器已注入 alias ssh='ssh-port'，因此终端里直接输入 ssh 即可打开面板；
-  带参数的用法（ssh user@host、ssh -V、ssh -p 2222 ...）全部原样交给原生
-  SSH 客户端，行为与安装前完全一致。
+  安装器已注入 alias sshh='ssh-port'，因此终端里输入 sshh 即可打开面板；
+  系统自带的 ssh 命令完全不受影响，ssh user@host 行为与安装前一致。
 
   本包装器自有选项（不会与 ssh 参数冲突）:
     --menu           打开管理面板
     --tool-version   显示本工具版本
     --tool-help      显示本帮助
 
-  绕过别名直接使用原生客户端:
-    command ssh user@host
+  直接运行面板（不依赖别名）:
+    ssh-port
+    ssh-port-menu
 EOF
 }
 
