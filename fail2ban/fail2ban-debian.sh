@@ -815,21 +815,38 @@ do_dir() {
   section "Fail2ban 关键路径"
   kv "主配置目录"      "$F2B_CONF_DIR"
   kv "本地覆盖配置"    "$F2B_JAIL_LOCAL"
-  kv "默认 jail 配置"  "$F2B_CONF_DIR/jail.conf"
+  kv "默认 jail 定义"  "$F2B_CONF_DIR/jail.conf"
+  kv "Debian 默认启用" "$F2B_CONF_DIR/jail.d/defaults-debian.conf"
+  kv "jail.d 目录"     "$F2B_CONF_DIR/jail.d/"
   kv "过滤器目录"      "$F2B_CONF_DIR/filter.d/"
   kv "动作目录"        "$F2B_CONF_DIR/action.d/"
-  kv "jail.d 目录"     "$F2B_CONF_DIR/jail.d/"
+  kv "路径变量"        "$F2B_CONF_DIR/paths-debian.conf"
   kv "运行日志"        "$F2B_LOG"
   kv "SSH 认证日志"    "$AUTH_LOG"
+  kv "封禁数据库"      "/var/lib/fail2ban/fail2ban.sqlite3"
   kv "systemd 服务"    "/lib/systemd/system/fail2ban.service"
 
   echo
   if [ -d "$F2B_CONF_DIR" ]; then
     info "配置目录内容："
     ls -lh "$F2B_CONF_DIR" 2>/dev/null
+    if [ -d "$F2B_CONF_DIR/jail.d" ]; then
+      echo
+      info "jail.d 目录内容（Debian 默认启用项 + 自定义规则都在这里）："
+      find "$F2B_CONF_DIR/jail.d" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null \
+        | sort | sed 's/^/  /'
+    fi
   else
     warn "$F2B_CONF_DIR 不存在（可能尚未安装）"
   fi
+
+  echo
+  section "新建规则该放哪"
+  kv "jail（规则本体）"   "${F2B_CONF_DIR}/jail.d/<服务名>.local"
+  kv "filter（日志正则）" "${F2B_CONF_DIR}/filter.d/<服务名>.conf"
+  info "加载优先级（后者覆盖前者）："
+  printf '  %s\n' "jail.conf  →  jail.d/*.conf  →  jail.local  →  jail.d/*.local"
+  info "看某项最终生效值：fail2ban-client get sshd port"
 }
 
 # ---------- 8. 查看日志 ----------

@@ -28,7 +28,7 @@ fail2ban/
 在服务器上直接执行（普通用户即可，脚本会自己 `sudo`）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.2/fail2ban/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/install.sh | bash
 ```
 
 它会依次自动完成，**全程只需最后在面板里点数字**：
@@ -136,7 +136,7 @@ GITHUB_TOKEN=ghp_xxx ./scripts/fetch-private.sh --dest ./src
 
 ```bash
 # 固定版本（推荐，内容不可变，不受 CDN 缓存影响）
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.2/fail2ban/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/install.sh \
   | bash -s -- install --port 2222 -y
 
 # 跟随 main（会被 CDN 缓存，实测可能数天不更新，不建议用于生产）
@@ -146,11 +146,11 @@ curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh \
 
 | 用途 | 地址 |
 |------|------|
-| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.2/fail2ban/install.sh` |
+| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/install.sh` |
 | 最新 main | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh` |
-| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.2/fail2ban/` |
+| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.3/fail2ban/` |
 
-说明：`@v1.0.2` 是标签，内容固定、**不受缓存影响**，请优先使用。
+说明：`@v1.0.3` 是标签，内容固定、**不受缓存影响**，请优先使用。
 `@main` 会随分支更新，但 jsDelivr 对分支有较长缓存（实测主动 purge 后仍可能返回旧内容），
 因此不要把它当"最新版"依赖；急用时在 URL 后加 `?t=时间戳` 也未必生效。
 
@@ -257,6 +257,38 @@ sudo systemctl restart fail2ban
 sudo fail2ban-tool status
 sudo fail2ban-tool doctor
 ```
+
+## 配置文件位置速查
+
+| 用途 | 路径 |
+|------|------|
+| 主配置目录 | `/etc/fail2ban/` |
+| 默认 jail 定义（含 22 端口的 `[sshd]`） | `/etc/fail2ban/jail.conf` |
+| Debian 包默认启用 sshd | `/etc/fail2ban/jail.d/defaults-debian.conf` |
+| 本工具写入的本地覆盖 | `/etc/fail2ban/jail.local` |
+| **新建规则放这里** | `/etc/fail2ban/jail.d/<服务名>.local` |
+| 自定义过滤器（日志正则） | `/etc/fail2ban/filter.d/<服务名>.conf` |
+| 运行日志 | `/var/log/fail2ban.log` |
+| 封禁数据库 | `/var/lib/fail2ban/fail2ban.sqlite3` |
+
+**加载优先级（后者覆盖前者）：**
+
+```
+jail.conf  →  jail.d/*.conf  →  jail.local  →  jail.d/*.local
+```
+
+所以默认的 22 端口配置不是一个文件，而是：
+`jail.conf` 里的 `[sshd] port = ssh` + `paths-common.conf` 的日志路径
++ `paths-debian.conf` 的 `backend = systemd` + `jail.d/defaults-debian.conf` 的 `enabled = true`
++ `jail.local` 里的实际阈值，四层叠加。
+
+```bash
+sudo fail2ban-tool dir          # 打印全部路径与实际文件列表
+sudo fail2ban-client get sshd port   # 看最终生效值
+```
+
+完整说明（含新建规则的完整示例、Debian 12 的 nftables/systemd 差异）见
+[fail2ban-guide.md](fail2ban-guide.md) 第三节。
 
 ## 文档
 

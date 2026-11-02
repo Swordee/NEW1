@@ -47,7 +47,153 @@ sudo systemctl status fail2ban
 
 ---
 
-## 三、基础配置（封禁 22 端口被扫）
+## 三、配置文件在哪、新规则放哪
+
+### 1. 一张表看清所有位置
+
+| 用途 | 路径 | 要不要改 |
+|------|------|----------|
+| 主配置目录 | `/etc/fail2ban/` | — |
+| 守护进程自身配置 | `/etc/fail2ban/fail2ban.conf` | ❌ 不改 |
+| **上游默认 jail 定义** | `/etc/fail2ban/jail.conf` | ❌ 不改（升级会覆盖） |
+| **Debian 包默认启用 sshd** | `/etc/fail2ban/jail.d/defaults-debian.conf` | ⚠️ 可读，不建议改 |
+| **本机实际生效的覆盖** | `/etc/fail2ban/jail.local` | ✅ 改这里 |
+| 分片配置（**推荐放新规则**） | `/etc/fail2ban/jail.d/<服务名>.local` | ✅ 新建 |
+| 过滤器（日志正则） | `/etc/fail2ban/filter.d/<名字>.conf` | ✅ 新建 |
+| 封禁动作 | `/etc/fail2ban/action.d/*.conf` | 一般不改 |
+| 路径变量 | `/etc/fail2ban/paths-common.conf`、`paths-debian.conf` | 一般不改 |
+| 运行日志 | `/var/log/fail2ban.log` | — |
+| 封禁记录数据库 | `/var/lib/fail2ban/fail2ban.sqlite3` | — |
+
+> 本工具的 `dir` 命令会把上面这些路径连同实际文件列表一起打印出来：
+> `sudo fail2ban-tool dir`
+
+### 2. 默认的 22 端口配置到底在哪个文件
+
+**不是一个文件，是四层叠加出来的。** 按加载顺序：
+
+```
+① /etc/fail2ban/jail.conf
+      [sshd]
+      port = ssh              ← ssh 在 /etc/services 中映射为 22
+      logpath = %(sshd_log)s
+      backend = %(sshd_backend)s
+
+② /etc/fail2ban/paths-common.conf
+      sshd_log = %(syslog_authpriv)s   →  /var/log/auth.log
+   /etc/fail2ban/paths-debian.conf
+      sshd_backend = systemd           ← Debian 覆盖默认 backend
+      banaction = nftables             ← Debian 12+ 默认用 nftables
+
+③ /etc/fail2ban/jail.d/defaults-debian.conf
+      [sshd]
+      enabled = true          ← Debian 包安装时写入，负责"启用"这个 jail
+
+④ /etc/fail2ban/jail.local
+      bantime / findtime / maxretry / ignoreip / port
+                              ← 本工具写入，覆盖上面所有值
+```
+
+对应关系速查：
+
+| 你看到的配置项 | 实际来源 |
+|----------------|----------|
+| `port = ssh`（即 22） | `jail.conf` 的 `[sshd]` 段 |
+| `logpath = /var/log/auth.log` | `paths-common.conf` 的 `sshd_log` |
+| `backend = systemd` | `paths-debian.conf`（Debian 12+ 默认） |
+| `enabled = true` | `jail.d/defaults-debian.conf` |
+| 最终生效的阈值 | `jail.local`（优先级高于以上全部） |
+
+看最终生效值（比翻文件可靠）：
+
+```bash
+sudo fail2ban-client get sshd port
+sudo fail2ban-client get sshd maxretry
+sudo fail2ban-client get sshd bantime
+sudo fail2ban-client get sshd findtime
+```
+
+### 3. 加载顺序：谁覆盖谁
+
+`man 5 jail.conf` 规定的顺序：
+
+```
+jail.conf
+jail.d/*.conf        ← 按字母序
+jail.local
+jail.d/*.local       ← 按字母序，优先级最高
+```
+
+**后解析的覆盖先解析的。** 所以：
+
+- `jail.local` 覆盖 `jail.conf` 和 `jail.d/defaults-debian.conf`
+- `jail.d/*.local` 又覆盖 `jail.local`
+
+### 4. 新建一条规则，放哪里
+
+**结论：新建 `/etc/fail2ban/jail.d/<服务名>.local`。**
+
+理由：`*.local` 优先级最高、按字母序加载、一个文件只管一个服务、升级不会覆盖、排查时一眼能定位。
+
+以封禁 Nginx 登录失败为例，一共两个文件：
+
+```bash
+# ① jail：规则本体 —— 放 jail.d/，不要动 jail.conf
+sudo tee /etc/fail2ban/jail.d/nginx-auth.local >/dev/null <<'EOF'
+[nginx-auth]
+enabled  = true
+port     = http,https
+filter   = nginx-auth
+logpath  = /var/log/nginx/access.log
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+EOF
+
+# ② filter：日志正则 —— 放 filter.d/，文件名要和 jail 里的 filter= 对应
+sudo tee /etc/fail2ban/filter.d/nginx-auth.conf >/dev/null <<'EOF'
+[Definition]
+failregex = ^<HOST> - .* "(GET|POST) [^"]* HTTP/[0-9.]+" (401|403) \d+
+ignoreregex =
+EOF
+
+# ③ 用真实日志验证正则能命中（最关键的一步）
+sudo fail2ban-regex /var/log/nginx/access.log /etc/fail2ban/filter.d/nginx-auth.conf
+
+# ④ 生效并确认
+sudo fail2ban-client reload
+sudo fail2ban-client status nginx-auth
+```
+
+命名约定：
+
+| 类型 | 路径 | 说明 |
+|------|------|------|
+| jail | `/etc/fail2ban/jail.d/<服务名>.local` | 定义阈值、端口、日志路径 |
+| filter | `/etc/fail2ban/filter.d/<服务名>.conf` | 定义"什么样的日志行算失败" |
+
+`jail` 里的 `filter = nginx-auth` 会自动去找 `filter.d/nginx-auth.conf`。
+两个文件名不必相同，但建议一致，方便对应。
+
+> 更详细的规则写法（正则语法、7 个服务范本、验证方法）见
+> [`fail2ban-rules-templates.md`](fail2ban-rules-templates.md)。
+
+### 5. Debian 12+ 的两个默认差异（容易踩）
+
+| 项 | Debian 11 及更早 | Debian 12+ |
+|----|------------------|------------|
+| 封禁动作 | `iptables-multiport` | **`nftables`**（由 `paths-debian.conf` 设定） |
+| sshd 日志 | 读 `/var/log/auth.log` | **`backend = systemd`**，直接读 journald |
+
+所以在 Debian 12+ 上：
+
+- 不要盲目照抄网上教程里的 `banaction = iptables-multiport`，先确认实际值：
+  `grep -E 'banaction|sshd_backend' /etc/fail2ban/paths-debian.conf`
+- `auth.log` 不存在是**正常**的，`logpath` 留空 + `backend = systemd` 即可
+
+---
+
+## 四、基础配置（封禁 22 端口被扫）
 
 > ⚠️ 永远不要直接修改 `/etc/fail2ban/jail.conf`（升级时会被覆盖）。
 > 请新建 `/etc/fail2ban/jail.local` 或在 `/etc/fail2ban/jail.d/` 下新建 `.conf` 文件。
@@ -62,8 +208,9 @@ bantime  = 1h
 findtime = 10m
 # 窗口内允许的最大失败次数，超过则封禁
 maxretry = 5
-# 封禁动作（iptables 多端口模式）
-banaction = iptables-multiport
+# 封禁动作：Debian 12+ 默认 nftables；老版本或 RHEL 系常用 iptables-multiport
+# 不确定就先看：grep banaction /etc/fail2ban/paths-debian.conf
+# banaction = iptables-multiport
 # 忽略的 IP（永远不封，务必加上你自己的管理 IP）
 ignoreip = 127.0.0.1/8 ::1 你的固定IP/32
 # 邮件通知（可选，需配置 sendmail/postfix）
@@ -112,7 +259,7 @@ sudo systemctl restart fail2ban
 
 ---
 
-## 四、常用查看 / 排查命令
+## 五、常用查看 / 排查命令
 
 ```bash
 # 1. 查看所有已启用的 jail
@@ -150,7 +297,7 @@ sudo tail -f /var/log/auth.log | grep "Failed password"
 
 ---
 
-## 五、卸载 Fail2ban
+## 六、卸载 Fail2ban
 
 ### 1. 先停服务并解封
 
@@ -188,7 +335,7 @@ sudo rm -f  /var/log/fail2ban.log*
 
 ---
 
-## 六、常见问题
+## 七、常见问题
 
 | 问题 | 排查方向 |
 |------|----------|
@@ -200,7 +347,7 @@ sudo rm -f  /var/log/fail2ban.log*
 
 ---
 
-## 七、最小可用配置速查（直接复制）
+## 八、最小可用配置速查（直接复制）
 
 ```ini
 [DEFAULT]
