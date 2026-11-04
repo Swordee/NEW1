@@ -9,7 +9,7 @@
 #  命令:
 #    auto        一键安装：自动探测 SSH 端口/当前 IP → 安装 → 交互式自检
 #    install     安装并启动（可配 --port / --ignore-ip）
-#    doctor      自检并交互式处理问题（服务/端口/白名单/日志后端等）
+#    doctor      自检并交互式处理问题（服务/端口/白名单/日志后端/依赖）
 #    uninstall   卸载
 #    restart     重启服务
 #    reload      重载配置（不中断封禁）
@@ -19,8 +19,10 @@
 #    logs        实时跟踪日志
 #    enable      设置开机自启
 #    disable     取消开机自启
+#    selfinstall 把本脚本安装为 /usr/local/bin/fail2ban-tool
 #    bootstrap   一键部署（装成系统命令 + 自动安装 + 进面板）
 #    menu        交互面板（默认）
+#    version     显示版本号
 #    help        显示帮助
 #
 #  选项:
@@ -56,7 +58,7 @@ SERVICE="fail2ban"
 # 管理命令安装位置（可用 F2B_BIN_DIR 覆盖，便于测试）
 BIN_DIR="${F2B_BIN_DIR:-/usr/local/bin}"
 TOOL_NAME="fail2ban-tool"
-SCRIPT_VERSION="1.0.7"
+SCRIPT_VERSION="1.0.8"
 
 # ---------- 全局状态 ----------
 SSH_PORT=""
@@ -68,6 +70,10 @@ SUPPRESS_POST_DOCTOR=0
 NONTTY_WARNED=0
 # 提示用的程序名：经 install.sh 引导时由引导器注入
 PROG_HINT="${F2B_PROG_HINT:-$0}"
+# 被 source / bash -c 调用时 $0 是 "bash"，直接显示会很怪
+case "$(basename "${PROG_HINT:-bash}")" in
+  bash|sh|dash|ash|-bash) PROG_HINT="$TOOL_NAME" ;;
+esac
 
 # ---------- 输出工具 ----------
 info()  { printf '%s[信息]%s %s\n' "$CYAN"   "$NC" "$*"; }
@@ -76,15 +82,59 @@ warn()  { printf '%s[警告]%s %s\n' "$YELLOW" "$NC" "$*"; }
 err()   { printf '%s[错误]%s %s\n' "$RED"    "$NC" "$*" >&2; }
 
 rule()    { printf '%s%s%s\n' "$DIM" "------------------------------------------------------------" "$NC"; }
-section() { printf '\n%s%s%s\n' "$BOLD" "$1" "$NC"; rule; }
+section() { printf '\n%s%s%s\n' "${BOLD}${CYAN}" "$1" "$NC"; rule; }
 
-# 计算字符串显示宽度（UTF-8 中文按 2 列计）
+# 去掉 ANSI 颜色码，只留可见文本（用于按显示宽度对齐）
+_strip_ansi() {
+  printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+# 计算字符串显示宽度（按 wcwidth 的"宽字符"区间判定）
+# 不能用"多字节字节数 / 3 * 2"这种近似：制表符 ─│╭、间隔号 · 等都是
+# 3 字节但只占 1 列，近似算法会把右边框顶歪。这里逐码点解码后再判宽。
 disp_width() {
-  local s="$1" bytes ascii mb
-  bytes=$(LC_ALL=C printf '%s' "$s" | wc -c)
-  ascii=$(LC_ALL=C printf '%s' "$s" | tr -d '\200-\377' | wc -c)
-  mb=$(( bytes - ascii ))
-  printf '%s' $(( ascii + (mb / 3) * 2 ))
+  local s="$1"
+  # 含转义符时才去色
+  case "$s" in
+    *$'\033'*) s=$(_strip_ansi "$s") ;;
+  esac
+  printf '%s' "$s" | LC_ALL=C awk '
+    # 建立字节 -> 数值 的查表（LC_ALL=C 下 substr 按字节切）
+    BEGIN { for (i = 1; i < 256; i++) ORD[sprintf("%c", i)] = i }
+    function iswide(cp) {
+      # 仅"宽"区间（East Asian Wide/Fullwidth），歧义宽度按 1 列处理
+      return (cp >= 4352   && cp <= 4447)   || \
+             (cp >= 11904  && cp <= 12350)  || \
+             (cp >= 12353  && cp <= 13311)  || \
+             (cp >= 13312  && cp <= 19903)  || \
+             (cp >= 19968  && cp <= 40959)  || \
+             (cp >= 40960  && cp <= 42191)  || \
+             (cp >= 44032  && cp <= 55203)  || \
+             (cp >= 63744  && cp <= 64255)  || \
+             (cp >= 65072  && cp <= 65135)  || \
+             (cp >= 65280  && cp <= 65376)  || \
+             (cp >= 65504  && cp <= 65510)  || \
+             (cp >= 131072)
+    }
+    {
+      n = length($0); i = 1; w = 0
+      while (i <= n) {
+        b = ORD[substr($0, i, 1)]
+        if (b < 128) { w += 1; i += 1; continue }
+        if (b < 192) { w += 1; i += 1; continue }          # 非法续字节，按 1 列兜底
+        if (b < 224) {                                      # 2 字节
+          w += 1; i += 2; continue
+        }
+        if (b < 240) {                                      # 3 字节
+          c1 = ORD[substr($0, i+1, 1)]; c2 = ORD[substr($0, i+2, 1)]
+          cp = (b - 224) * 4096 + (c1 - 128) * 64 + (c2 - 128)
+          w += (iswide(cp) ? 2 : 1); i += 3; continue
+        }
+        w += 2; i += 4                                      # 4 字节（emoji / CJK 扩展）
+      }
+      print w
+    }
+  '
 }
 
 # 按显示宽度左对齐填充
@@ -98,7 +148,7 @@ pad_disp() {
 
 # 键值对输出（按显示宽度对齐，中英文混排不错位）
 kv() {
-  local label="$1" value="$2"
+  local label="$1" value="${2:--}"
   printf '  %s%s%s : %s\n' "$CYAN" "$(pad_disp "$label" 22)" "$NC" "$value"
 }
 
@@ -570,6 +620,22 @@ _show_start_error() {
   info "配置自检：fail2ban-client -t"
 }
 
+# backend = systemd 需要 python3-systemd 模块。
+# 缺它时 `fail2ban-client -t` 依然通过（只解析配置），但服务会在
+# "Server ready" 之后启动 jail 时失败并退出 255 —— 非常难查，所以装完就补齐。
+ensure_systemd_backend() {
+  [ "$(jail_get_key sshd backend)" = "systemd" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c 'import systemd' >/dev/null 2>&1 && return 0
+  info "检测到 backend = systemd，补齐依赖 python3-systemd ..."
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y python3-systemd >/dev/null 2>&1; then
+    ok "已安装 python3-systemd"
+    return 0
+  fi
+  warn "python3-systemd 安装失败，服务可能起不来：apt install python3-systemd"
+  return 1
+}
+
 # ---------- 1. 安装 ----------
 do_install() {
   need_root install
@@ -601,6 +667,8 @@ do_install() {
       ok "已修复 $F2B_JAIL_LOCAL 中的问题配置"
     fi
   fi
+
+  ensure_systemd_backend || true
 
   info "设置开机自启并启动..."
   systemctl enable "$SERVICE" >/dev/null 2>&1
@@ -973,12 +1041,14 @@ do_uninstall() {
   info "卸载软件包（purge）..."
   DEBIAN_FRONTEND=noninteractive apt purge -y fail2ban || warn "apt purge 返回非零，可能已卸载"
 
-  if confirm "是否同时删除配置目录 $F2B_CONF_DIR 与日志 $F2B_LOG ?"; then
+  if confirm "是否同时删除配置目录 $F2B_CONF_DIR、日志与封禁数据库？"; then
     rm -rf "$F2B_CONF_DIR"
     rm -f "$F2B_LOG" "$F2B_LOG".* 2>/dev/null || true
-    ok "已删除配置目录与日志"
+    rm -f /var/lib/fail2ban/fail2ban.sqlite3 2>/dev/null || true
+    rm -rf /var/run/fail2ban 2>/dev/null || true
+    ok "已删除配置目录、日志与封禁数据库"
   else
-    info "保留配置目录 $F2B_CONF_DIR"
+    info "保留配置目录 $F2B_CONF_DIR（封禁数据库同样保留）"
   fi
 
   ok "卸载完成。"
@@ -990,11 +1060,12 @@ do_restart() {
   need_root restart
   require_cmd systemctl || return 1
   info "重启 Fail2ban 服务..."
-  if systemctl restart "$SERVICE"; then
+  if systemctl restart "$SERVICE" && sleep 1 && systemctl is-active --quiet "$SERVICE"; then
     ok "重启完成"
     show_status
   else
-    err "重启失败，请查看：journalctl -u $SERVICE -n 50"
+    err "重启失败（status=255 表示配置初始化失败）"
+    _show_start_error
     return 1
   fi
 }
@@ -1026,7 +1097,7 @@ show_status() {
     warn "无法连接 fail2ban 服务（可能未启动或未安装）"
     return 0
   fi
-  fail2ban-client status
+  fail2ban-client status 2>/dev/null
 
   local jails j
   jails=$(fail2ban-client status 2>/dev/null \
@@ -1106,8 +1177,11 @@ do_dir() {
 do_logs() {
   require_cmd tail || return 1
   if [ ! -f "$F2B_LOG" ]; then
-    warn "$F2B_LOG 不存在，尝试查看 journald..."
-    journalctl -u "$SERVICE" -n 50 --no-pager 2>/dev/null || err "无法读取日志"
+    warn "$F2B_LOG 不存在，改为跟踪 journald（Ctrl+C 返回面板）..."
+    # 注意要带 -f，否则只是把历史日志打印一遍就返回，看着像"没反应"
+    trap ':' INT
+    journalctl -u "$SERVICE" -n 50 -f --no-pager -o cat 2>/dev/null || err "无法读取日志"
+    trap - INT
     return 0
   fi
   info "实时跟踪 $F2B_LOG（Ctrl+C 返回面板）..."
@@ -1145,29 +1219,38 @@ do_disable() {
 }
 
 # ---------- 帮助 ----------
+do_version() { printf '%s v%s\n' "$TOOL_NAME" "$SCRIPT_VERSION"; }
+
 show_help() {
   printf 'Fail2ban 一键管理脚本 v%s（Debian / Ubuntu）\n\n' "$SCRIPT_VERSION"
-  cat <<'EOF'
+  cat <<EOF
 用法:
-  ./fail2ban-debian.sh <命令> [选项]
-  非 root 时会自动通过 sudo 提权重入，无需手动加 sudo。
+  ${PROG_HINT} <命令> [选项]
+  不带命令时直接进入交互面板；非 root 会自动通过 sudo 提权重入。
 
-命令:
+安装与修复:
   bootstrap   一键部署：装成系统命令 + 自动安装 + 进入交互面板（傻瓜式入口）
   auto        一键安装：自动探测 SSH 端口/当前 IP → 安装 → 交互式自检
-  selfinstall 仅把本脚本安装为 /usr/local/bin/fail2ban-tool
   install     安装并启动（可配 --port / --ignore-ip）
-  doctor      自检并交互式处理问题（服务/端口/白名单/日志后端等）
-  uninstall   卸载
-  restart     重启服务
-  reload      重载配置（不中断封禁）
-  status      查看服务状态与封禁列表（含 sshd 生效配置）
+  doctor      自检并交互式处理问题（服务/端口/白名单/日志后端/依赖）
+  selfinstall 仅把本脚本安装为 ${BIN_DIR}/${TOOL_NAME}
+
+查看:
+  status      服务状态 + 封禁列表 + sshd 生效配置
   info        只查看 sshd 的生效配置（bantime/findtime/maxretry/白名单/动作）
-  dir         显示关键目录位置
+  dir         显示关键目录位置与新规则该放哪
   logs        实时跟踪日志
-  enable      设置开机自启
-  disable     取消开机自启
+
+服务控制:
+  restart     重启服务（失败会自动带出关键日志）
+  reload      重载配置（不中断现有封禁）
+  enable      开启开机自启
+  disable     关闭开机自启
+
+其他:
   menu        交互面板（默认）
+  version     显示版本号
+  uninstall   卸载（默认保留配置，会二次确认）
   help        显示本帮助
 
 选项:
@@ -1177,13 +1260,12 @@ show_help() {
   --no-elevate            禁止自动 sudo 提权（非 root 时直接报错）
 
 示例:
-  curl -fsSL <url> | bash                          # 一条命令装好并进面板
-  ./fail2ban-debian.sh bootstrap                   # 同上（本地脚本）
-  sudo fail2ban-tool                               # 装完后随时打开面板
-  ./fail2ban-debian.sh auto                        # 一键装好并自检
-  ./fail2ban-debian.sh install --port 2222
-  ./fail2ban-debian.sh doctor                      # 出问题先跑这个
-  ./fail2ban-debian.sh uninstall --yes
+  curl -fsSL <install.sh 地址> | bash      # 一条命令装好并进面板
+  sudo ${TOOL_NAME}                        # 装完后随时打开面板
+  ${PROG_HINT} auto                        # 一键装好并自检
+  ${PROG_HINT} install --port 2222 --ignore-ip "1.2.3.4/32"
+  ${PROG_HINT} doctor                      # 出问题先跑这个
+  ${PROG_HINT} uninstall --yes
 EOF
 }
 
@@ -1197,11 +1279,18 @@ do_selfinstall() {
     info "请先下载再执行：curl -fsSL <脚本地址> -o f2b.sh && sudo bash f2b.sh selfinstall"
     return 1
   fi
+  # 已经在用装好的副本运行时，$0 与目标路径是同一个文件，
+  # 直接 cp 会报 "'x' and 'x' are the same file" 并让这一步莫名失败
+  if [ "$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")" = "$target" ]; then
+    ok "当前已在运行安装好的命令：${target}（v${SCRIPT_VERSION}）"
+    info "如需更新，请下载新版本后执行：sudo bash <新脚本> selfinstall"
+    return 0
+  fi
   if mkdir -p "$BIN_DIR" 2>/dev/null \
      && cp "$0" "$target" 2>/dev/null \
      && chmod 0755 "$target" 2>/dev/null; then
     ok "已安装管理命令：${target}"
-    info "以后可直接执行：sudo ${TOOL_NAME}"
+    info "版本：v${SCRIPT_VERSION}    以后可直接执行：sudo ${TOOL_NAME}"
     return 0
   fi
   err "安装失败：无法写入 ${target}（权限不足或目录只读）"
@@ -1260,18 +1349,49 @@ do_bootstrap() {
 }
 
 # ---------- 交互面板 ----------
-_panel_rule() { printf '%s%s%s\n' "$DIM" "------------------------------------------------------------" "$NC"; }
+PANEL_W=60
+
+# 生成 n 个重复字符（替代 seq，少一次 fork）
+_rep() {
+  local n="$1" ch="$2" s=""
+  [ "$n" -gt 0 ] || return 0
+  printf -v s '%*s' "$n" ''
+  printf '%s' "${s// /$ch}"
+}
+
+# 面板边框：$1 左角，$2 右角
+_panel_border() {
+  printf '%s%s%s%s%s\n' "$DIM" "$1" "$(_rep "$PANEL_W" '─')" "$2" "$NC"
+}
+
+# 面板内部分隔线
+_panel_rule() { _panel_border '├' '┤'; }
+
+# 面板内容行：按可见宽度补齐，含颜色码也不会错位
+_panel_row() {
+  local text="$1" w pad
+  w=$(disp_width "$text")
+  pad=$(( PANEL_W - 2 - w ))
+  [ "$pad" -lt 0 ] && pad=0
+  printf '%s│%s %s%*s %s│%s\n' "$DIM" "$NC" "$text" "$pad" '' "$DIM" "$NC"
+}
+
+# 分组标题与菜单项
+_panel_group() { _panel_row "  ${BOLD}${CYAN}$1${NC}"; }
+_panel_item()  { _panel_row "$(printf '   %s%2s%s  %s' "$BOLD" "$1" "$NC" "$2")"; }
 
 _panel_status() {
   local state autostart="-" bans="-" jails="无" port="-" j n total=0
-  state="${RED}未安装${NC}"
+  # 状态用纯文本徽标而不是圆点符号：● 属于"宽度歧义"字符，
+  # 在不同终端里可能占 1 列或 2 列，会把右边框顶歪
+  state="${RED}[未安装]${NC}"
   if command -v fail2ban-client >/dev/null 2>&1; then
-    if _t systemctl is-active --quiet "$SERVICE"; then
-      state="${GREEN}运行中${NC}"
+    if _t systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+      state="${GREEN}[运行中]${NC}"
     else
-      state="${YELLOW}已停止${NC}"
+      state="${YELLOW}[已停止]${NC}"
     fi
-    if _t systemctl is-enabled --quiet "$SERVICE"; then
+    if _t systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then
       autostart="是"
     else
       autostart="否"
@@ -1289,36 +1409,44 @@ _panel_status() {
         case "$n" in ''|*[!0-9]*) n=0 ;; esac
         total=$(( total + n ))
       done
+      jails=$(printf '%s' "$jails" | tr ',' ' ' | sed 's/^ *//; s/ *$//')
     else
       jails="无"
     fi
     bans="$total"
   fi
-  printf '  服务 %s    自启 %s    封禁 %s 个    端口 %s\n' "$state" "$autostart" "$bans" "$port"
-  printf '  Jail: %s\n' "$jails"
+  _panel_row "$(printf '  服务 %s   %s自启%s %s   %s端口%s %s' \
+      "$(pad_disp "$state" 10)" "$DIM" "$NC" "$autostart" "$DIM" "$NC" "$port")"
+  _panel_row "$(printf '  %s封禁%s %s 个   %sJail%s %s' \
+      "$DIM" "$NC" "$bans" "$DIM" "$NC" "$jails")"
 }
 
 show_menu() {
-  printf '\n%s%s%s\n' "$BOLD" "============================================================" "$NC"
-  printf '%s  Fail2ban 管理面板 · Debian / Ubuntu%s  %sv%s%s\n' \
-    "$BOLD" "$NC" "$DIM" "$SCRIPT_VERSION" "$NC"
+  printf '\n'
+  _panel_border '╭' '╮'
+  _panel_row "  ${BOLD}Fail2ban 管理面板${NC}  ${DIM}Debian / Ubuntu · v${SCRIPT_VERSION}${NC}"
   _panel_rule
   _panel_status
   _panel_rule
-  echo "   1) 一键安装 / 自动修复"
-  echo "   2) 手动安装（自定义端口与白名单）"
-  echo "   3) 自检并处理问题"
-  echo "   4) 查看状态与封禁列表"
-  echo "   5) 重启服务"
-  echo "   6) 重载配置"
-  echo "   7) 查看实时日志"
-  echo "   8) 显示目录位置"
-  echo "   9) 开启开机自启"
-  echo "  10) 关闭开机自启"
-  echo "  11) 卸载"
-  echo "  12) 重装管理命令到 ${BIN_DIR}"
-  echo "   0) 退出"
-  _panel_rule
+  _panel_group "安装与修复"
+  _panel_item 1  "一键安装 / 自动修复"
+  _panel_item 2  "手动安装（自定义端口与白名单）"
+  _panel_item 3  "自检并处理问题"
+  _panel_group "查看"
+  _panel_item 4  "服务状态与封禁列表"
+  _panel_item 5  "SSH 生效配置"
+  _panel_item 6  "实时日志"
+  _panel_item 7  "目录位置"
+  _panel_group "服务控制"
+  _panel_item 8  "重启服务"
+  _panel_item 9  "重载配置（不中断封禁）"
+  _panel_item 10 "开启开机自启"
+  _panel_item 11 "关闭开机自启"
+  _panel_group "维护"
+  _panel_item 12 "重装管理命令"
+  _panel_item 13 "卸载 Fail2ban"
+  _panel_item 0  "退出"
+  _panel_border '╰' '╯'
 }
 
 do_menu() {
@@ -1329,7 +1457,7 @@ do_menu() {
 
   while true; do
     show_menu
-    if ! read_line "请选择 [0-12]: "; then
+    if ! read_line "$(printf '%s请选择 [0-13] >%s ' "$CYAN" "$NC")"; then
       printf '\n'
       # 完全没有交互能力（既无 stdin 数据、也无 /dev/tty）时给出明确说明
       if ! [ -t 0 ] && ! have_tty; then
@@ -1339,25 +1467,27 @@ do_menu() {
       warn "输入结束，退出面板"
       return 0
     fi
-    choice="$REPLY_LINE"
+    # 去掉首尾空白，容忍 " 1 "、Tab 之类的输入
+    choice="${REPLY_LINE#"${REPLY_LINE%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
     case "$choice" in
-      1)  do_auto ;;
-      2)  SSH_PORT=""; IGNORE_IPS=""; do_install ;;
-      3)  do_doctor ;;
-      4)  do_status ;;
-      5)  do_restart ;;
-      6)  do_reload ;;
-      7)  do_logs ;;
-      8)  do_dir ;;
-      9)  do_enable ;;
-      10) do_disable ;;
-      11) do_uninstall ;;
-      12) do_selfinstall ;;
-      0)  echo "再见"; return 0 ;;
-      "") warn "没有输入内容，请输入 0-12" ;;
-      *)  warn "无效选项：$choice" ;;
+      1)  do_auto;      pause ;;
+      2)  SSH_PORT=""; IGNORE_IPS=""; do_install; pause ;;
+      3)  do_doctor;    pause ;;
+      4)  do_status;    pause ;;
+      5)  do_info;      pause ;;
+      6)  do_logs ;;                       # tail -f 自己等 Ctrl+C，不再 pause
+      7)  do_dir;       pause ;;
+      8)  do_restart;   pause ;;
+      9)  do_reload;    pause ;;
+      10) do_enable;    pause ;;
+      11) do_disable;   pause ;;
+      12) do_selfinstall; pause ;;
+      13) do_uninstall; pause ;;
+      0)  printf '\n'; ok "已退出"; return 0 ;;
+      "") warn "没有输入内容，请输入 0-13" ;;
+      *)  warn "无效选项：${choice}（请输入 0-13）" ;;
     esac
-    [ "$choice" != "7" ] && pause
   done
 }
 
@@ -1395,6 +1525,8 @@ main() {
         NO_ELEVATE=1; shift ;;
       -h|--help)
         show_help; exit 0 ;;
+      -V|--version)
+        do_version; exit 0 ;;
       -*)
         err "未知参数：$1（用 help 查看用法）"
         exit 1 ;;
@@ -1425,6 +1557,7 @@ main() {
     enable)      do_enable ;;
     disable)     do_disable ;;
     menu)        do_menu ;;
+    version|-v)  do_version ;;
     help)        show_help ;;
     *)
       err "未知命令：$CMD"
