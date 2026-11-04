@@ -28,7 +28,7 @@ fail2ban/
 在服务器上直接执行（普通用户即可，脚本会自己 `sudo`）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.6/fail2ban/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.7/fail2ban/install.sh | bash
 ```
 
 它会依次自动完成，**全程只需最后在面板里点数字**：
@@ -136,7 +136,7 @@ GITHUB_TOKEN=ghp_xxx ./scripts/fetch-private.sh --dest ./src
 
 ```bash
 # 固定版本（推荐，内容不可变，不受 CDN 缓存影响）
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.6/fail2ban/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.7/fail2ban/install.sh \
   | bash -s -- install --port 2222 -y
 
 # 跟随 main（会被 CDN 缓存，实测可能数天不更新，不建议用于生产）
@@ -146,11 +146,11 @@ curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh \
 
 | 用途 | 地址 |
 |------|------|
-| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.6/fail2ban/install.sh` |
+| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.7/fail2ban/install.sh` |
 | 最新 main | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh` |
-| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.6/fail2ban/` |
+| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.7/fail2ban/` |
 
-说明：`@v1.0.6` 是标签，内容固定、**不受缓存影响**，请优先使用。
+说明：`@v1.0.7` 是标签，内容固定、**不受缓存影响**，请优先使用。
 `@main` 会随分支更新，但 jsDelivr 对分支有较长缓存（实测主动 purge 后仍可能返回旧内容），
 因此不要把它当"最新版"依赖；急用时在 URL 后加 `?t=时间戳` 也未必生效。
 
@@ -297,6 +297,20 @@ sudo fail2ban-tool doctor
 > v1.0.6 起，即使 `jail.local` 已存在（`install` 不会覆盖它），也会先检查里面的
 > `logpath` / `banaction` 是不是坏配置，并询问是否就地修复；启动失败时还会直接
 > 把 journal 里的关键错误打出来，不用再手动翻日志。
+>
+> v1.0.7 起，自检还会检查 `backend = systemd` 所需的 `python3-systemd` 模块、
+> `/var/run/fail2ban` socket 目录和残留 `fail2ban-server` 进程 —— 这三样是
+> 「配置检查通过、打出 `Server ready` 之后仍然退出 255」的三个高频原因。
+
+**如果 `fail2ban-client -t` 通过、服务却起不来**，基本就是上面那三样，逐条试：
+
+```bash
+sudo apt install -y python3-systemd          # 缺模块：配置能过，启动 jail 时挂
+sudo mkdir -p /var/run/fail2ban              # socket 目录缺失
+sudo pkill -f fail2ban-server                # 残留进程占着 socket
+sudo rm -f /var/run/fail2ban/fail2ban.sock /var/run/fail2ban/fail2ban.pid
+sudo systemctl restart fail2ban
+```
 
 详细排查表（含 filter 缺失、port 写错等）见
 [fail2ban-guide.md](fail2ban-guide.md) 第七节「`status=255` 启动失败专项排查」。

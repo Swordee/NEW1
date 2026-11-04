@@ -56,7 +56,7 @@ SERVICE="fail2ban"
 # 管理命令安装位置（可用 F2B_BIN_DIR 覆盖，便于测试）
 BIN_DIR="${F2B_BIN_DIR:-/usr/local/bin}"
 TOOL_NAME="fail2ban-tool"
-SCRIPT_VERSION="1.0.6"
+SCRIPT_VERSION="1.0.7"
 
 # ---------- 全局状态 ----------
 SSH_PORT=""
@@ -545,9 +545,23 @@ repair_existing_jail() {
 
 # 启动失败时把 journal 里最关键的几行直接打出来，省得用户再翻日志
 _show_start_error() {
-  local out
-  out=$(journalctl -u "$SERVICE" -n 30 --no-pager -o cat 2>/dev/null \
-        | grep -iE 'error|failed|not found|denied|no such' | tail -n 5)
+  local out ready
+  # 优先取 fail2ban 自己打的 ERROR 行（形如 "2026-11-04 19:52:46,995 fail2ban [pid]: ERROR ..."）
+  # 注意不能简单 grep 'failed'，否则命中的全是 systemd 的
+  # "fail2ban.service: Failed with result 'exit-code'." —— 这类行没有任何信息量
+  out=$(journalctl -u "$SERVICE" -n 80 --no-pager -o cat 2>/dev/null \
+        | grep -E '[[:space:]]ERROR[[:space:]]' | tail -n 5)
+  if [ -z "$out" ]; then
+    # 没有 ERROR 行，说明配置这关过了、是启动之后才失败的（常见：socket 目录、
+    # 残留进程、封禁数据库）。此时把最后几行原始日志打出来，让用户看到 "Server ready"
+    out=$(journalctl -u "$SERVICE" -n 10 --no-pager -o cat 2>/dev/null | tail -n 10)
+    ready=$(printf '%s' "$out" | grep -c 'Server ready')
+    if [ "$ready" -gt 0 ]; then
+      warn "配置已通过，但服务在「Server ready」之后自行退出"
+      info "常见原因：socket 目录 /var/run/fail2ban 缺失、有残留 fail2ban-server 进程、封禁数据库损坏"
+      info "定位命令：sudo systemctl stop $SERVICE && sudo fail2ban-server -f -vv start"
+    fi
+  fi
   if [ -n "$out" ]; then
     printf '\n%s最近的相关日志：%s\n' "$DIM" "$NC"
     printf '%s\n' "$out" | sed 's/^/  /'
@@ -783,6 +797,57 @@ do_doctor() {
       ok "封禁后端：$ba" ;;
   esac
 
+  # --- 5.7 socket 目录与残留进程（服务起来又立刻退出的常见原因）---
+  if [ -d /var/run/fail2ban ]; then
+    ok "socket 目录存在：/var/run/fail2ban"
+  else
+    issues=$((issues+1)); warn "socket 目录 /var/run/fail2ban 不存在（fail2ban 无法创建 socket）"
+    if confirm "是否创建该目录？"; then
+      if mkdir -p /var/run/fail2ban && chown root:root /var/run/fail2ban; then
+        ok "已创建 /var/run/fail2ban"; fixed=$((fixed+1))
+      else
+        err "创建失败"
+      fi
+    fi
+  fi
+
+  if command -v pgrep >/dev/null 2>&1 && ! systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+    local stale
+    stale=$(pgrep -f 'fail2ban-server' 2>/dev/null | head -n 5 | tr '\n' ' ')
+    if [ -n "$stale" ]; then
+      issues=$((issues+1))
+      warn "服务未运行，但存在残留 fail2ban-server 进程：${stale}"
+      if confirm "是否结束残留进程并清理 socket/pid 文件？"; then
+        pkill -f 'fail2ban-server' 2>/dev/null || true
+        sleep 1
+        rm -f /var/run/fail2ban/fail2ban.sock /var/run/fail2ban/fail2ban.pid 2>/dev/null || true
+        ok "已清理残留进程与 socket 文件"; fixed=$((fixed+1))
+      fi
+    fi
+  fi
+
+  # --- 5.8 systemd 后端依赖：backend = systemd 需要 python3-systemd ---
+  # 缺这个模块时 fail2ban-client -t 仍然通过（它只解析配置），
+  # 但服务会在 "Server ready" 之后启动 jail 时失败并退出 255。
+  if [ "$(jail_get_key sshd backend)" = "systemd" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+      warn "未找到 python3，无法检查 systemd 后端依赖"
+    elif python3 -c 'import systemd' >/dev/null 2>&1; then
+      ok "systemd 后端依赖已就绪（python3-systemd）"
+    else
+      issues=$((issues+1))
+      warn "sshd jail 使用 backend = systemd，但 python3 无法 import systemd 模块"
+      info "缺少它时配置检查能过，服务却会在「Server ready」之后退出 255"
+      if confirm "是否安装 python3-systemd？"; then
+        if apt-get install -y python3-systemd >/dev/null 2>&1; then
+          ok "已安装 python3-systemd"; fixed=$((fixed+1))
+        else
+          warn "安装失败，请手动执行：apt install python3-systemd"
+        fi
+      fi
+    fi
+  fi
+
   # --- 6. 服务是否运行 ---
   if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
     ok "服务运行中"
@@ -790,7 +855,15 @@ do_doctor() {
     issues=$((issues+1)); warn "服务未运行"
     if confirm "是否启动服务？"; then
       if systemctl start "$SERVICE" >/dev/null 2>&1; then
-        ok "服务已启动"; fixed=$((fixed+1))
+        # systemctl start 对 Type=forking 的服务会先返回 0，
+        # 必须再确认一次进程还活着，否则会把「起来就死」误报成成功
+        sleep 1
+        if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+          ok "服务已启动"; fixed=$((fixed+1))
+        else
+          err "启动命令返回成功，但进程随即退出"
+          _show_start_error
+        fi
       else
         err "启动失败（status=255 表示配置初始化失败）"
         _show_start_error
@@ -1205,13 +1278,13 @@ _panel_status() {
     fi
     port=$(jail_get_key sshd port)
     [ -z "$port" ] && port="未设置"
-    jails=$(_t fail2ban-client status \
+    jails=$(_t fail2ban-client status 2>/dev/null \
             | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d '\t')
     # 注意：必须在遍历之后再把空值换成"无"，
     # 否则会拿"无"当 jail 名去查询（多一次无意义调用，卡顿时更明显）
     if [ -n "$jails" ]; then
       for j in $(printf '%s' "$jails" | tr ',' ' '); do
-        n=$(_t fail2ban-client status "$j" \
+        n=$(_t fail2ban-client status "$j" 2>/dev/null \
             | sed -n 's/.*Currently banned:[[:space:]]*//p' | tr -d '[:space:]')
         case "$n" in ''|*[!0-9]*) n=0 ;; esac
         total=$(( total + n ))

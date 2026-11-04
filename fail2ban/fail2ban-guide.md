@@ -466,6 +466,7 @@ ERROR  ERROR: test configuration failed
 | `Failed to execute ban jail 'sshd' action ...` / `iptables: not found` | `banaction` 与系统工具不匹配（Debian 12 默认 nftables，可能没有 iptables 命令） | `banaction = nftables` 或 `apt install iptables` |
 | `Unable to read the filter` / `No such file ... filter.d/xxx.conf` | `filter` 名字写错或自定义 filter 未创建 | 检查 `/etc/fail2ban/filter.d/<名字>.conf` |
 | `Invalid port` | `port` 写法错误（空值、多余空格、错误分隔符） | 用逗号分隔，如 `port = 22,2222` |
+| 打出 `Server ready` 之后才退出 | jail 启动阶段失败（配置本身没问题） | 见下方「两个容易踩的坑」第 2 条 |
 
 **修复步骤（日志缺失型，最常见）**
 
@@ -529,7 +530,16 @@ sudo journalctl -u fail2ban -f      # 另开一个窗口观察
    看起来像"服务没起来"，其实是命令敲错了。`-t`（test）只读配置、不连 socket，服务死了也能用。
 
 2. **日志里出现 `Server ready` 之后仍然 255**
-   说明配置这关过了，是启动之后才失败的（action 初始化、socket 目录、残留进程）。
+   说明配置这关过了（`fail2ban-client -t` 也会通过），是**启动 jail 时**才失败的。
+   注意 fail2ban 的 jail 是异步启动的，所以错误出现在 `Server ready` 之后很正常。
+   三个高频原因：
+
+   | 现象 | 原因 | 修复 |
+   |------|------|------|
+   | `Server ready` 后立刻退出，无 ERROR | `backend = systemd` 但缺 `python3-systemd` 模块 | `sudo apt install -y python3-systemd` |
+   | 同上，且 `fail2ban-client` 报 socket 不存在 | `/var/run/fail2ban` 目录缺失 | `sudo mkdir -p /var/run/fail2ban` |
+   | 同上，且 `pgrep -af fail2ban-server` 有输出 | 残留进程占着 socket | `sudo pkill -f fail2ban-server`，再删掉 `/var/run/fail2ban/fail2ban.sock` |
+
    用前台模式跑一次，错误会直接打在屏幕上：
 
    ```bash
