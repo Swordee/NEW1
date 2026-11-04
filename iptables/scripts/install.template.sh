@@ -3,17 +3,19 @@
 #  iptables-wizard 一键安装器（支持 curl | bash）
 # ------------------------------------------------------------------------------
 #  用法：
-#    curl -fsSL https://example.com/install.sh | sudo bash    # 远程一键
-#    sudo bash install.sh                                     # 本地执行
-#    sudo bash install.sh --prefix /usr                       # 自定义前缀
-#    sudo bash install.sh --with-deps                         # 顺便装 iptables
-#    sudo bash install.sh --uninstall                         # 卸载
-#    bash install.sh --check                                  # 只校验内嵌脚本
+#    curl -fsSL https://example.com/install.sh | sudo bash -s -- --run  # 装完直接进界面
+#    curl -fsSL https://example.com/install.sh | sudo bash              # 只安装
+#    sudo bash install.sh                                              # 本地执行
+#    sudo bash install.sh --prefix /usr                                # 自定义前缀
+#    sudo bash install.sh --no-deps                                    # 跳过依赖安装
+#    sudo bash install.sh --uninstall                                  # 卸载
+#    bash install.sh --check                                           # 只校验内嵌脚本
 #    bash install.sh --version | --help
 #
 #  说明：
 #    · 主脚本已 gzip+base64 内嵌在本文件中，无需联网即可安装
-#    · 全程无交互（不会读 stdin），因此可以直接 curl | bash
+#    · 安装阶段全程无交互（不读 stdin），因此可以直接 curl | bash
+#    · --run 启动界面时从 /dev/tty 读取输入，不会把管道里的脚本残片当按键
 #    · 安装位置：<prefix>/sbin/iptables-wizard，并在 <prefix>/bin 建同名软链
 # ==============================================================================
 set -euo pipefail
@@ -54,7 +56,8 @@ ${APP} 安装器 v${VERSION}
 选项：
   --prefix DIR     安装前缀，默认 ${DEFAULT_PREFIX}
                    （二进制落在 DIR/sbin，DIR/bin 下建软链）
-  --with-deps      顺便用 apt 安装 iptables 与 iptables-persistent
+  --no-deps        跳过依赖安装（默认会装 iptables 与 netfilter-persistent）
+  --run            安装完成后立即进入交互式管理界面
   --force          跳过发行版检查（非 Debian 系也能装）
   --uninstall      卸载程序（保留 /etc/iptables-wizard 备份目录）
   --purge          与 --uninstall 一起用，连备份与配置一起删除
@@ -63,13 +66,11 @@ ${APP} 安装器 v${VERSION}
   -h, --help       显示本帮助
 
 示例：
-  curl -fsSL https://example.com/install.sh | sudo bash
-  sudo bash install.sh --prefix /usr --with-deps
+  curl -fsSL https://example.com/install.sh | sudo bash -s -- --run
+  sudo bash install.sh --prefix /usr
   sudo bash install.sh --uninstall --purge
 EOF
 }
-
-cmd_exists() { command -v "$1" >/dev/null 2>&1; }
 
 need_root() {
   if [[ ${EUID} -ne 0 ]]; then
@@ -84,8 +85,8 @@ trap cleanup EXIT
 
 decode_payload() {   # decode_payload 输出文件路径
   local out="$1"
-  cmd_exists base64 || die "缺少 base64 命令（apt-get install -y coreutils）"
-  cmd_exists gzip   || die "缺少 gzip 命令（apt-get install -y gzip）"
+  command -v base64 >/dev/null 2>&1 || die "缺少 base64 命令（apt-get install -y coreutils）"
+  command -v gzip   >/dev/null 2>&1 || die "缺少 gzip 命令（apt-get install -y gzip）"
   if ! printf '%s' "${PAYLOAD_B64}" | base64 -d 2>/dev/null | gzip -dc >"${out}" 2>/dev/null; then
     die "内嵌负载解压失败，安装包可能已损坏"
   fi
@@ -93,8 +94,11 @@ decode_payload() {   # decode_payload 输出文件路径
 }
 
 verify_payload() {   # verify_payload 文件路径
-  local f="$1" actual
-  cmd_exists sha256sum || { warn "缺少 sha256sum，跳过完整性校验"; return 0; }
+  local f="$1" actual=""
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    warn "缺少 sha256sum，跳过完整性校验"
+    return 0
+  fi
   actual=$(sha256sum "${f}" | awk '{print $1}')
   if [[ ${actual} != "${PAYLOAD_SHA256}" ]]; then
     die "完整性校验失败：期望 ${PAYLOAD_SHA256:0:16}…，实际 ${actual:0:16}…"
@@ -135,6 +139,49 @@ check_os() {
   esac
 }
 
+# -------------------------------------------------------------- 依赖安装 ---
+install_deps() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    warn "未找到 apt-get，跳过依赖安装"
+    warn "请手动安装：apt-get install -y iptables netfilter-persistent"
+    return 0
+  fi
+
+  step "安装依赖（iptables / netfilter-persistent）"
+  if ! timeout 180 apt-get update -qq; then
+    warn "apt-get update 失败或超时，继续尝试安装已有缓存中的包"
+  fi
+
+  # iptables 必装；持久化组件在 Debian 上叫 netfilter-persistent，Ubuntu 上有 iptables-persistent
+  local need_persist=0 ver=""
+  if ! command -v iptables >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y iptables || warn "iptables 安装失败"
+  fi
+  if ! command -v netfilter-persistent >/dev/null 2>&1 && ! command -v iptables-persistent >/dev/null 2>&1; then
+    need_persist=1
+  fi
+
+  if (( need_persist )); then
+    if ! DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y netfilter-persistent; then
+      warn "netfilter-persistent 安装失败，尝试旧包名 iptables-persistent"
+      DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y iptables-persistent \
+        || warn "持久化组件安装失败：重启后规则不会自动恢复（可在界面【2 安装与检测】里补装）"
+    fi
+  fi
+
+  if command -v iptables >/dev/null 2>&1; then
+    ver=$(iptables --version 2>/dev/null | head -n 1) || true
+    ok "iptables：${ver}"
+  else
+    warn "iptables 仍未可用，界面内【2 安装与检测】可重试"
+  fi
+  if command -v netfilter-persistent >/dev/null 2>&1 || command -v iptables-persistent >/dev/null 2>&1; then
+    ok "规则持久化组件已就绪"
+  else
+    warn "缺少持久化组件，重启后规则不会自动恢复"
+  fi
+}
+
 # ------------------------------------------------------------------ 安装 -----
 do_install() {
   local prefix="$1"
@@ -148,24 +195,24 @@ do_install() {
   install -m 0755 -o root -g root "${TMP_BIN}" "${prefix}/sbin/${APP}" \
     || die "写入 ${prefix}/sbin 失败"
   ok "已安装 ${prefix}/sbin/${APP}"
-  ln -sfn "${prefix}/sbin/${APP}" "${prefix}/bin/${APP}"
-  ok "已创建软链 ${prefix}/bin/${APP}"
+
+  # 软链失败不致命：主程序已在 sbin 下，可直接 "${prefix}/sbin/${APP}" 运行
+  if ln -sfn "${prefix}/sbin/${APP}" "${prefix}/bin/${APP}" 2>/dev/null; then
+    ok "已创建软链 ${prefix}/bin/${APP}"
+  else
+    warn "无法创建软链 ${prefix}/bin/${APP}（不影响使用）"
+    warn "请直接运行：sudo ${prefix}/sbin/${APP}"
+  fi
 
   step "准备数据目录"
   mkdir -p /etc/iptables-wizard/backups
   chmod 700 /etc/iptables-wizard /etc/iptables-wizard/backups 2>/dev/null || true
   ok "备份目录 /etc/iptables-wizard/backups"
 
-  if [[ ${WITH_DEPS} == 1 ]]; then
-    step "安装依赖（iptables / iptables-persistent）"
-    if cmd_exists apt-get; then
-      DEBIAN_FRONTEND=noninteractive apt-get update -qq || warn "apt-get update 失败，继续尝试安装"
-      DEBIAN_FRONTEND=noninteractive apt-get install -y iptables iptables-persistent netfilter-persistent \
-        || warn "依赖安装失败，请手动执行：apt-get install -y iptables iptables-persistent"
-      ok "依赖处理完成"
-    else
-      warn "未找到 apt-get，跳过依赖安装"
-    fi
+  if (( WITH_DEPS )); then
+    install_deps
+  else
+    info "已按 --no-deps 跳过依赖安装"
   fi
 
   step "安装完成"
@@ -174,12 +221,43 @@ do_install() {
   printf '    %s   %s\n' "${C}sudo ${APP} doctor${N}"  "环境自检"
   printf '    %s   %s\n' "${C}sudo ${APP} status${N}"  "查看防火墙状态"
   printf '\n'
-  if ! cmd_exists iptables; then
-    warn "当前系统还没有 iptables，可执行：apt-get install -y iptables iptables-persistent"
-  fi
+  case ":${PATH}:" in
+    *":${prefix}/bin:"*) : ;;
+    *) warn "${prefix}/bin 不在当前 PATH 中，可用完整路径调用：sudo ${prefix}/sbin/${APP}" ;;
+  esac
   info "备份目录：/etc/iptables-wizard/backups"
   info "卸载：sudo bash install.sh --uninstall"
   printf '\n'
+
+  if (( RUN_TUI )); then
+    launch_tui "${prefix}/sbin/${APP}"
+  fi
+}
+
+# 启动交互界面：curl | bash 之后 stdin 是管道，必须改从 /dev/tty 读取，否则会读到脚本残片
+launch_tui() {
+  local bin="$1"
+  step "启动交互式管理界面"
+  if [[ ! -x ${bin} ]]; then
+    warn "找不到可执行的 ${bin}，请手动检查安装结果"
+    return 1
+  fi
+  # 情况一：stdin 本来就是终端，直接启动
+  if [[ -t 0 ]]; then
+    cleanup
+    trap - EXIT
+    exec "${bin}"
+  fi
+  # 情况二：stdin 是管道（curl | bash），改从控制终端读取按键。
+  # 注意 /dev/tty 可能存在但打不开（无控制终端的 SSH 会话），必须实际打开一次才算可用
+  if ! (: </dev/tty) 2>/dev/null; then
+    warn "当前没有可用的终端（/dev/tty 不可用），无法自动进入界面"
+    warn "请手动执行：sudo ${APP}"
+    return 1
+  fi
+  cleanup
+  trap - EXIT
+  exec "${bin}" < /dev/tty
 }
 
 do_uninstall() {
@@ -193,12 +271,15 @@ do_uninstall() {
   else
     warn "未找到 ${target}，可能安装在其他前缀（用 --prefix 指定）"
   fi
-  [[ -L ${prefix}/bin/${APP} ]] && { rm -f "${prefix}/bin/${APP}"; ok "已删除软链 ${prefix}/bin/${APP}"; }
+  if [[ -L ${prefix}/bin/${APP} ]]; then
+    rm -f "${prefix}/bin/${APP}"
+    ok "已删除软链 ${prefix}/bin/${APP}"
+  fi
 
   if [[ ${PURGE} == 1 ]]; then
     if [[ -d /etc/iptables-wizard ]]; then
-      rm -rf /etc/iptables-wizard
-      ok "已删除配置与备份 /etc/iptables-wizard"
+      rm -rf /etc/iptables-wizard || warn "删除 /etc/iptables-wizard 失败，请手动清理"
+      [[ -d /etc/iptables-wizard ]] || ok "已删除配置与备份 /etc/iptables-wizard"
     fi
     info "系统防火墙规则（/etc/iptables/rules.v4）未删除，如需清理请手动处理"
   else
@@ -221,7 +302,8 @@ do_check() {
 PREFIX="${DEFAULT_PREFIX}"
 ACTION="install"
 FORCE=0
-WITH_DEPS=0
+WITH_DEPS=1
+RUN_TUI=0
 PURGE=0
 
 parse_args() {
@@ -232,14 +314,16 @@ parse_args() {
         PREFIX="${2%/}"
         shift 2 ;;
       --prefix=*) PREFIX="${1#*=}"; PREFIX="${PREFIX%/}"; shift ;;
-      --with-deps) WITH_DEPS=1; shift ;;
-      --force)     FORCE=1; shift ;;
-      --uninstall) ACTION="uninstall"; shift ;;
-      --purge)     PURGE=1; shift ;;
-      --check)     ACTION="check"; shift ;;
-      --version)   printf '%s %s\n' "${APP}-installer" "${VERSION}"; exit 0 ;;
-      -h|--help)   usage; exit 0 ;;
-      *)           die "未知参数：$1（用 --help 查看用法）" ;;
+      --no-deps)    WITH_DEPS=0; shift ;;
+      --with-deps)  WITH_DEPS=1; shift ;;   # 兼容旧写法（已是默认行为）
+      --run)        RUN_TUI=1; shift ;;
+      --force)      FORCE=1; shift ;;
+      --uninstall)  ACTION="uninstall"; shift ;;
+      --purge)      PURGE=1; shift ;;
+      --check)      ACTION="check"; shift ;;
+      --version)    printf '%s %s\n' "${APP}-installer" "${VERSION}"; exit 0 ;;
+      -h|--help)    usage; exit 0 ;;
+      *)            die "未知参数：$1（用 --help 查看用法）" ;;
     esac
   done
   [[ -n ${PREFIX} ]] || die "--prefix 不能为空"

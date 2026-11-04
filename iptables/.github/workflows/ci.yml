@@ -104,6 +104,9 @@ jobs:
           test ! -e "${PREFIX}/sbin/iptables-wizard"
           test ! -e "${PREFIX}/bin/iptables-wizard"
 
+      - name: e2e 模拟 curl | bash（安装 / --run / 进界面 / 卸载）
+        run: bash tests/e2e-install.sh
+
   # ---------------------------------------------------------------------------
   # 4. 文件规范：LF 换行、无行尾空白、bash shebang
   # ---------------------------------------------------------------------------

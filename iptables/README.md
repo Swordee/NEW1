@@ -5,7 +5,7 @@ Debian / Ubuntu 上的一键 iptables 防火墙管理脚本。纯 Bash 实现，
 
 ```
 ╭──────────────────────────────────────────────────────────────╮
-│  iptables-wizard v1.1.0   ·   Debian 防火墙一键管理工具      │
+│  iptables-wizard v1.2.0   ·   Debian 防火墙一键管理工具      │
 ╰──────────────────────────────────────────────────────────────╯
 ```
 
@@ -19,31 +19,80 @@ Debian / Ubuntu 上的一键 iptables 防火墙管理脚本。纯 Bash 实现，
 
 ## 一、快速开始
 
-### 1. 一行安装（推荐）
+### 1. 一行安装并进入交互界面（傻瓜式，推荐）
+
+**国内加速（jsDelivr CDN，国内网络优先用这个）**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Swordee/NEW1/main/iptables/install.sh | sudo bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/iptables/install.sh | sudo bash -s -- --run
 ```
 
-安装器会：校验内嵌脚本的 SHA256 → `bash -n` 语法自检 → 检查系统是否为 Debian 系 →
-写入 `/usr/local/sbin/iptables-wizard` 并在 `/usr/local/bin` 建软链。
+**GitHub 直连（海外网络或 CDN 不可达时用）**
 
-安装完成后直接运行：
+```bash
+curl -fsSL https://raw.githubusercontent.com/Swordee/NEW1/main/iptables/install.sh | sudo bash -s -- --run
+```
+
+这一条命令会依次完成：
+
+1. 下载安装器，校验内嵌脚本的 SHA256 与语法
+2. 检查系统是否为 Debian / Ubuntu 系
+3. 主程序写入 `/usr/local/sbin/iptables-wizard`，并在 `/usr/local/bin` 建软链
+4. **自动安装依赖** `iptables` 与 `netfilter-persistent`（保证规则重启后自动恢复）
+5. 创建备份目录 `/etc/iptables-wizard/backups`
+6. **直接进入交互式管理界面**
+
+> ⚠️ 精简系统可能没有 `sudo` 命令（root 直接登录的 VPS 常见）。先执行 `apt-get install -y sudo`，
+> 或者直接以 root 运行（去掉 `sudo` 即可）：
+> `curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/iptables/install.sh | bash -s -- --run`
+
+安装完成后，日常使用只需要一条命令：
 
 ```bash
 sudo iptables-wizard
 ```
 
-> 仓库是私有的，匿名 `curl` 会拿到 404。私有仓库请改用带 token 的方式：
-> ```bash
-> curl -fsSL -H "Authorization: token $GITHUB_TOKEN" \
->   https://raw.githubusercontent.com/Swordee/NEW1/main/iptables/install.sh | sudo bash
-> ```
+只想装程序、不动系统依赖时加 `--no-deps`；只安装、不进界面就去掉 `--run`。
+
+#### CDN 备用节点
+
+主域名不通时，只换主机名即可，路径完全一样：
+
+| 节点 | 地址前缀 |
+| --- | --- |
+| Cloudflare（默认） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/...` |
+| Fastly | `https://fastly.jsdelivr.net/gh/Swordee/NEW1@main/...` |
+| Gcore | `https://gcore.jsdelivr.net/gh/Swordee/NEW1@main/...` |
+| Cloudflare 备用 | `https://testingcf.jsdelivr.net/gh/Swordee/NEW1@main/...` |
+
+#### 关于 jsDelivr 的三点说明
+
+1. **只能镜像公开仓库**。本仓库已公开，可直接用；若以后转回私有，CDN 地址会立即 404。
+2. **`@main` 有缓存**。分支引用在 CDN 侧一般缓存约 12 小时，推了新提交后不会立刻生效。
+   想立刻拿到最新版本，把 `@main` 换成具体的 commit SHA：
+
+   ```bash
+   # 锁定到某个提交，内容永久不变（推荐写进部署脚本）
+   curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@ca62320/iptables/install.sh | sudo bash
+   ```
+
+3. **手动刷新缓存**（推了新提交、又不想等缓存过期时）：
+
+   ```bash
+   curl -s https://purge.jsdelivr.net/gh/Swordee/NEW1@main/iptables/install.sh
+   ```
+
+   > 新仓库首次被访问时，jsDelivr 可能返回一次 `Failed to fetch ... from GitHub`，
+   > 等几秒重试即可，属于冷缓存回源失败，不是仓库问题。
 
 ### 2. 下载后执行（不放心 `| bash` 时用这个）
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/Swordee/NEW1/main/iptables/install.sh
+# CDN（国内快）
+curl -fsSLO https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/iptables/install.sh
+# 或 GitHub 直连
+# curl -fsSLO https://raw.githubusercontent.com/Swordee/NEW1/main/iptables/install.sh
+
 bash install.sh --check          # 先看看内嵌负载是否完整
 sudo bash install.sh             # 确认无误再安装
 ```
@@ -55,12 +104,20 @@ git clone https://github.com/Swordee/NEW1.git && cd NEW1/iptables
 sudo bash iptables-wizard.sh
 ```
 
+不想 clone 整个仓库，也可以从 CDN 单独取文件：
+
+```bash
+curl -fsSLO https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/iptables/iptables-wizard.sh
+sudo bash iptables-wizard.sh
+```
+
 ### 安装器参数
 
 | 参数 | 说明 |
 | --- | --- |
+| `--run` | 安装完成后立即进入交互界面（`curl \| bash` 场景自动改从 `/dev/tty` 读取按键） |
 | `--prefix DIR` | 安装前缀，默认 `/usr/local` |
-| `--with-deps` | 顺带 `apt-get install iptables iptables-persistent` |
+| `--no-deps` | 跳过依赖安装（默认会装 `iptables` 与 `netfilter-persistent`） |
 | `--force` | 跳过发行版检查（在非 Debian 系上强装） |
 | `--check` | 只校验内嵌脚本：解码 + SHA256 + 语法 + 版本 |
 | `--uninstall` | 卸载程序（保留 `/etc/iptables-wizard` 下的备份） |
@@ -157,14 +214,15 @@ scripts/
   build-install.sh           把主脚本打包进模板，生成 install.sh
 tests/
   smoke.sh                   冒烟测试，39 项断言，不需要 root
+  e2e-install.sh             安装端到端测试（模拟 curl | bash：安装 / --run / 进界面 / 卸载）
 .github/workflows/ci.yml     GitHub Actions 流水线
 ```
 
 ### 本地跑一遍 CI
 
 ```bash
-bash ci.sh                # 全量：语法 → ShellCheck → 冒烟 → 安装器 → 版本
-bash ci.sh --quick        # 跳过冒烟测试，改注释/文档时用
+bash ci.sh                # 全量：语法 → ShellCheck → 冒烟 → 端到端 → 安装器 → 版本
+bash ci.sh --quick        # 跳过冒烟与端到端测试，改注释/文档时用
 bash ci.sh --strict       # ShellCheck 提到 info 级
 bash ci.sh --only shellcheck,version
 bash ci.sh --fix          # 先重新生成 install.sh 再检查
@@ -173,15 +231,15 @@ bash ci.sh --fix          # 先重新生成 install.sh 再检查
 输出长这样：
 
 ```
- ▶ 1/6 语法检查 (bash -n)
+ ▶ 1/7 语法检查 (bash -n)
    ✔ iptables-wizard.sh
    ...
- ▶ 2/6 静态分析 (shellcheck)
-   ✔ 6 个脚本，0 条告警（级别：style）
- ▶ 3/6 冒烟测试 (tests/smoke.sh)
+ ▶ 2/7 静态分析 (shellcheck)
+   ✔ 7 个脚本，0 条告警（级别：style）
+ ▶ 3/7 冒烟测试 (tests/smoke.sh)
    ✔ 全部通过：39 项
  ...
- ✔ 全部通过：6 项 · 耗时 5s
+ ✔ 全部通过：7 项 · 耗时 5s
 ```
 
 没装 ShellCheck 时脚本会给出三种安装方式；也可以手动指定：
