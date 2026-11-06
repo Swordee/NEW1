@@ -58,7 +58,7 @@ SERVICE="fail2ban"
 # 管理命令安装位置（可用 F2B_BIN_DIR 覆盖，便于测试）
 BIN_DIR="${F2B_BIN_DIR:-/usr/local/bin}"
 TOOL_NAME="fail2ban-tool"
-SCRIPT_VERSION="1.0.8"
+SCRIPT_VERSION="1.0.9"
 
 # ---------- 全局状态 ----------
 SSH_PORT=""
@@ -89,42 +89,41 @@ _strip_ansi() {
   printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g'
 }
 
-# 计算字符串显示宽度（按 wcwidth 的"宽字符"区间判定）
-# 不能用"多字节字节数 / 3 * 2"这种近似：制表符 ─│╭、间隔号 · 等都是
-# 3 字节但只占 1 列，近似算法会把右边框顶歪。这里逐码点解码后再判宽。
+# UTF-8 宽度解码库：disp_width 与 clip_disp 共用，避免两份 iswide 各自漂移。
+# 不用"多字节字节数 / 3 * 2"这种近似：制表符 ─│╭、间隔号 · 都是 3 字节但只占
+# 1 列，近似算法会把右边框顶歪。这里逐码点解码后按 wcwidth 的宽字符区间判宽。
+_AWK_W_LIB='
+BEGIN { for (i = 1; i < 256; i++) ORD[sprintf("%c", i)] = i }
+function iswide(cp) {
+  # 仅"宽"区间（East Asian Wide/Fullwidth），歧义宽度按 1 列处理
+  return (cp >= 4352   && cp <= 4447)   || \
+         (cp >= 11904  && cp <= 12350)  || \
+         (cp >= 12353  && cp <= 13311)  || \
+         (cp >= 13312  && cp <= 19903)  || \
+         (cp >= 19968  && cp <= 40959)  || \
+         (cp >= 40960  && cp <= 42191)  || \
+         (cp >= 44032  && cp <= 55203)  || \
+         (cp >= 63744  && cp <= 64255)  || \
+         (cp >= 65072  && cp <= 65135)  || \
+         (cp >= 65280  && cp <= 65376)  || \
+         (cp >= 65504  && cp <= 65510)  || \
+         (cp >= 131072)
+}
+'
+
 disp_width() {
   local s="$1"
   # 含转义符时才去色
   case "$s" in
     *$'\033'*) s=$(_strip_ansi "$s") ;;
   esac
-  printf '%s' "$s" | LC_ALL=C awk '
-    # 建立字节 -> 数值 的查表（LC_ALL=C 下 substr 按字节切）
-    BEGIN { for (i = 1; i < 256; i++) ORD[sprintf("%c", i)] = i }
-    function iswide(cp) {
-      # 仅"宽"区间（East Asian Wide/Fullwidth），歧义宽度按 1 列处理
-      return (cp >= 4352   && cp <= 4447)   || \
-             (cp >= 11904  && cp <= 12350)  || \
-             (cp >= 12353  && cp <= 13311)  || \
-             (cp >= 13312  && cp <= 19903)  || \
-             (cp >= 19968  && cp <= 40959)  || \
-             (cp >= 40960  && cp <= 42191)  || \
-             (cp >= 44032  && cp <= 55203)  || \
-             (cp >= 63744  && cp <= 64255)  || \
-             (cp >= 65072  && cp <= 65135)  || \
-             (cp >= 65280  && cp <= 65376)  || \
-             (cp >= 65504  && cp <= 65510)  || \
-             (cp >= 131072)
-    }
+  printf '%s' "$s" | LC_ALL=C awk "$_AWK_W_LIB"'
     {
       n = length($0); i = 1; w = 0
       while (i <= n) {
         b = ORD[substr($0, i, 1)]
-        if (b < 128) { w += 1; i += 1; continue }
-        if (b < 192) { w += 1; i += 1; continue }          # 非法续字节，按 1 列兜底
-        if (b < 224) {                                      # 2 字节
-          w += 1; i += 2; continue
-        }
+        if (b < 192) { w += 1; i += 1; continue }           # ASCII / 非法续字节
+        if (b < 224) { w += 1; i += 2; continue }           # 2 字节
         if (b < 240) {                                      # 3 字节
           c1 = ORD[substr($0, i+1, 1)]; c2 = ORD[substr($0, i+2, 1)]
           cp = (b - 224) * 4096 + (c1 - 128) * 64 + (c2 - 128)
@@ -133,6 +132,34 @@ disp_width() {
         w += 2; i += 4                                      # 4 字节（emoji / CJK 扩展）
       }
       print w
+    }
+    # 空串没有任何输入行，主块不会执行，这里补 0，避免调用方拿到空值做算术
+    END { if (w == "") print 0 }
+  '
+}
+
+# 按显示宽度截断，超出部分以 … 收尾（截断点不会切碎 UTF-8 码点）
+# 面板里的动态内容（jail 列表、端口列表）可能超长，不截断就会顶破右边框。
+clip_disp() {
+  local s="$1" max="$2"
+  [ "$(disp_width "$s")" -le "$max" ] && { printf '%s' "$s"; return 0; }
+  printf '%s' "$s" | LC_ALL=C awk -v max="$max" "$_AWK_W_LIB"'
+    {
+      n = length($0); i = 1; w = 0; out = ""
+      while (i <= n) {
+        b = ORD[substr($0, i, 1)]
+        if (b < 192)      { len = 1; cw = 1 }
+        else if (b < 224) { len = 2; cw = 1 }
+        else if (b < 240) {
+          c1 = ORD[substr($0, i+1, 1)]; c2 = ORD[substr($0, i+2, 1)]
+          cp = (b - 224) * 4096 + (c1 - 128) * 64 + (c2 - 128)
+          len = 3; cw = (iswide(cp) ? 2 : 1)
+        } else            { len = 4; cw = 2 }
+        # 预留 1 列给 …
+        if (w + cw > max - 1) { out = out "…"; break }
+        out = out substr($0, i, len); w += cw; i += len
+      }
+      printf "%s", out
     }
   '
 }
@@ -325,7 +352,7 @@ pause() {
   # 只在确实有终端时等待；管道/脚本化场景不等待，
   # 否则会把后面本该给菜单的输入（如 "0"）吃掉
   if [ -t 0 ] || [ -n "$F2B_TTY_FD" ]; then
-    read_line "按回车键返回菜单..." || return 0
+    read_line "按回车返回" || return 0
   fi
   return 0
 }
@@ -1229,8 +1256,8 @@ show_help() {
   不带命令时直接进入交互面板；非 root 会自动通过 sudo 提权重入。
 
 安装与修复:
-  bootstrap   一键部署：装成系统命令 + 自动安装 + 进入交互面板（傻瓜式入口）
-  auto        一键安装：自动探测 SSH 端口/当前 IP → 安装 → 交互式自检
+  bootstrap   部署：装成系统命令 + 自动安装 + 进入交互面板（傻瓜式入口）
+  auto        自动安装：探测 SSH 端口/当前 IP → 安装 → 交互式自检
   install     安装并启动（可配 --port / --ignore-ip）
   doctor      自检并交互式处理问题（服务/端口/白名单/日志后端/依赖）
   selfinstall 仅把本脚本安装为 ${BIN_DIR}/${TOOL_NAME}
@@ -1368,25 +1395,79 @@ _panel_border() {
 _panel_rule() { _panel_border '├' '┤'; }
 
 # 面板内容行：按可见宽度补齐，含颜色码也不会错位
+# 动态内容（jail 列表、端口列表）可能超长，这里做兜底截断，
+# 否则整行会顶破右边框（旧版只把负 padding 归零，没有截断）。
 _panel_row() {
   local text="$1" w pad
   w=$(disp_width "$text")
+  if [ "$w" -gt $(( PANEL_W - 2 )) ]; then
+    text=$(clip_disp "$(_strip_ansi "$text")" $(( PANEL_W - 2 )))
+    w=$(disp_width "$text")
+  fi
   pad=$(( PANEL_W - 2 - w ))
   [ "$pad" -lt 0 ] && pad=0
   printf '%s│%s %s%*s %s│%s\n' "$DIM" "$NC" "$text" "$pad" '' "$DIM" "$NC"
 }
 
+# 空行：用来分隔分组，让组间距离大于组内距离
+_panel_blank() { _panel_row ""; }
+
 # 分组标题与菜单项
-_panel_group() { _panel_row "  ${BOLD}${CYAN}$1${NC}"; }
-_panel_item()  { _panel_row "$(printf '   %s%2s%s  %s' "$BOLD" "$1" "$NC" "$2")"; }
+# 组名用青色但不再加粗：加粗会让组名比条目更响，读起来层级是反的。
+_panel_group() { _panel_row "  ${CYAN}$1${NC}"; }
+# 编号降为 DIM：用户读的是标题，编号只是索引，不该抢视觉重量。
+_panel_item()  { _panel_row "$(printf '  %s%2s%s  %s' "$DIM" "$1" "$NC" "$2")"; }
+
+# 汇总各 jail 的当前封禁数。
+# 单个 jail 直接查；多个 jail 并行查，避免 N 次串行 3 秒超时把面板卡住。
+_panel_ban_total() {
+  local jails="$1" j tmp sum=0 n f idx=0
+  # shellcheck disable=SC2086  # jail 名以空格分隔，此处需要分词
+  set -- $jails
+  if [ $# -eq 0 ]; then
+    printf '0'
+    return 0
+  fi
+  if [ $# -eq 1 ]; then
+    n=$(_t fail2ban-client status "$1" 2>/dev/null \
+        | sed -n 's/.*Currently banned:[[:space:]]*//p' | tr -d '[:space:]')
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    printf '%s' "$n"
+    return 0
+  fi
+  # 临时目录基准固定为 /tmp：mktemp 在部分环境（Git Bash）会返回带盘符的路径，
+  # 拼进 glob / rm 时会出错，甚至把报错打到面板上。
+  tmp=$(mktemp -d /tmp/f2b-panel.XXXXXX 2>/dev/null) \
+    || tmp=$(mktemp -d 2>/dev/null) \
+    || { printf '0'; return 0; }
+  for j in "$@"; do
+    idx=$(( idx + 1 ))
+    ( _t fail2ban-client status "$j" 2>/dev/null \
+        | sed -n 's/.*Currently banned:[[:space:]]*//p' | tr -d '[:space:]' > "$tmp/$idx" ) &
+  done
+  wait
+  for f in "$tmp"/*; do
+    [ -f "$f" ] || continue
+    n=$(cat "$f")
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    sum=$(( sum + n ))
+  done
+  rm -rf "$tmp"
+  printf '%s' "$sum"
+}
 
 _panel_status() {
-  local state autostart="-" bans="-" jails="无" port="-" j n total=0
+  # 标签统一 4 列宽（服务/端口/自启/封禁/Jail 都是 4 显示列），
+  # 值列固定宽度，状态变化时后面的列不会左右抖动。
+  local state port="-" autostart="-" bans="-" jails="-" jails_list="" total=0 svc_up=0
+
   # 状态用纯文本徽标而不是圆点符号：● 属于"宽度歧义"字符，
-  # 在不同终端里可能占 1 列或 2 列，会把右边框顶歪
+  # 在不同终端里可能占 1 列或 2 列，会把右边框顶歪。
+  # 三种徽标都是 8 列宽，所以值列宽度恒定。
   state="${RED}[未安装]${NC}"
   if command -v fail2ban-client >/dev/null 2>&1; then
     if _t systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+      svc_up=1
       state="${GREEN}[运行中]${NC}"
     else
       state="${YELLOW}[已停止]${NC}"
@@ -1397,28 +1478,38 @@ _panel_status() {
       autostart="否"
     fi
     port=$(jail_get_key sshd port)
-    [ -z "$port" ] && port="未设置"
-    jails=$(_t fail2ban-client status 2>/dev/null \
-            | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d '\t')
-    # 注意：必须在遍历之后再把空值换成"无"，
-    # 否则会拿"无"当 jail 名去查询（多一次无意义调用，卡顿时更明显）
-    if [ -n "$jails" ]; then
-      for j in $(printf '%s' "$jails" | tr ',' ' '); do
-        n=$(_t fail2ban-client status "$j" 2>/dev/null \
-            | sed -n 's/.*Currently banned:[[:space:]]*//p' | tr -d '[:space:]')
-        case "$n" in ''|*[!0-9]*) n=0 ;; esac
-        total=$(( total + n ))
-      done
-      jails=$(printf '%s' "$jails" | tr ',' ' ' | sed 's/^ *//; s/ *$//')
-    else
-      jails="无"
-    fi
-    bans="$total"
+    [ -n "$port" ] || port="-"
   fi
-  _panel_row "$(printf '  服务 %s   %s自启%s %s   %s端口%s %s' \
-      "$(pad_disp "$state" 10)" "$DIM" "$NC" "$autostart" "$DIM" "$NC" "$port")"
-  _panel_row "$(printf '  %s封禁%s %s 个   %sJail%s %s' \
-      "$DIM" "$NC" "$bans" "$DIM" "$NC" "$jails")"
+
+  # 服务没起来时 client 连不上，此时封禁数/Jail 一律显示 -，
+  # 不要拿 0 冒充"确实没有封禁"。
+  if [ "$svc_up" -eq 1 ]; then
+    jails_list=$(_t fail2ban-client status 2>/dev/null \
+                 | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d '\t')
+    jails_list=$(printf '%s' "$jails_list" | tr ',' ' ' | tr -s ' ' \
+                 | sed 's/^ *//; s/ *$//; s/ /, /g')
+    if [ -n "$jails_list" ]; then
+      jails="$jails_list"
+      total=$(_panel_ban_total "$jails_list")
+      case "$total" in ''|*[!0-9]*) total=0 ;; esac
+    else
+      total=0
+    fi
+    # 封禁数是这个面板里唯一值得给颜色的数字
+    if [ "$total" -gt 0 ]; then
+      bans="${CYAN}${total} 个${NC}"
+    else
+      bans="${DIM}0 个${NC}"
+    fi
+  fi
+
+  # 四个标签（服务/端口/自启/封禁）都是 4 显示列，值列统一 8 列，
+  # 于是标签固定落在第 2/15/28/41 列，形成等距节奏；
+  # 值宽固定后，状态从 [运行中] 变成 - 时后面的列也不会左右抖动。
+  _panel_row "$(printf '  服务 %s 端口 %s 自启 %s 封禁 %s' \
+      "$(pad_disp "$state" 8)" "$(pad_disp "$port" 8)" \
+      "$(pad_disp "$autostart" 8)" "$bans")"
+  _panel_row "$(printf '  Jail %s' "$jails")"
 }
 
 show_menu() {
@@ -1429,22 +1520,26 @@ show_menu() {
   _panel_status
   _panel_rule
   _panel_group "安装与修复"
-  _panel_item 1  "一键安装 / 自动修复"
+  _panel_item 1  "安装与配置"
   _panel_item 2  "手动安装（自定义端口与白名单）"
-  _panel_item 3  "自检并处理问题"
+  _panel_item 3  "诊断与修复"
+  _panel_blank
   _panel_group "查看"
-  _panel_item 4  "服务状态与封禁列表"
-  _panel_item 5  "SSH 生效配置"
+  _panel_item 4  "状态与封禁列表"
+  _panel_item 5  "SSH 封禁参数"
   _panel_item 6  "实时日志"
   _panel_item 7  "目录位置"
+  _panel_blank
   _panel_group "服务控制"
   _panel_item 8  "重启服务"
   _panel_item 9  "重载配置（不中断封禁）"
   _panel_item 10 "开启开机自启"
   _panel_item 11 "关闭开机自启"
+  _panel_blank
   _panel_group "维护"
-  _panel_item 12 "重装管理命令"
-  _panel_item 13 "卸载 Fail2ban"
+  _panel_item 12 "重装 fail2ban-tool"
+  _panel_item 13 "卸载"
+  _panel_rule
   _panel_item 0  "退出"
   _panel_border '╰' '╯'
 }

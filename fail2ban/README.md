@@ -28,7 +28,7 @@ fail2ban/
 在服务器上直接执行（普通用户即可，脚本会自己 `sudo`）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.8/fail2ban/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.9/fail2ban/install.sh | bash
 ```
 
 它会依次自动完成，**全程只需最后在面板里点数字**：
@@ -49,29 +49,33 @@ sudo fail2ban-tool
 
 ```
 ╭────────────────────────────────────────────────────────────╮
-│   Fail2ban 管理面板  Debian / Ubuntu · v1.0.8              │
+│   Fail2ban 管理面板  Debian / Ubuntu · v1.0.9              │
 ├────────────────────────────────────────────────────────────┤
-│   服务 [运行中]     自启 是   端口 22                      │
-│   封禁 6 个   Jail sshd                                    │
+│   服务 [运行中] 端口 22       自启 是       封禁 12 个     │
+│   Jail sshd, nginx-http-auth, nginx-limit-req, postfix-sa… │
 ├────────────────────────────────────────────────────────────┤
 │   安装与修复                                               │
-│     1  一键安装 / 自动修复                                 │
-│     2  手动安装（自定义端口与白名单）                      │
-│     3  自检并处理问题                                      │
+│    1  安装与配置                                           │
+│    2  手动安装（自定义端口与白名单）                       │
+│    3  诊断与修复                                           │
+│                                                            │
 │   查看                                                     │
-│     4  服务状态与封禁列表                                  │
-│     5  SSH 生效配置                                        │
-│     6  实时日志                                            │
-│     7  目录位置                                            │
+│    4  状态与封禁列表                                       │
+│    5  SSH 封禁参数                                         │
+│    6  实时日志                                             │
+│    7  目录位置                                             │
+│                                                            │
 │   服务控制                                                 │
-│     8  重启服务                                            │
-│     9  重载配置（不中断封禁）                              │
-│    10  开启开机自启                                        │
-│    11  关闭开机自启                                        │
+│    8  重启服务                                             │
+│    9  重载配置（不中断封禁）                               │
+│   10  开启开机自启                                         │
+│   11  关闭开机自启                                         │
+│                                                            │
 │   维护                                                     │
-│    12  重装管理命令                                        │
-│    13  卸载 Fail2ban                                       │
-│     0  退出                                                │
+│   12  重装 fail2ban-tool                                   │
+│   13  卸载                                                 │
+├────────────────────────────────────────────────────────────┤
+│    0  退出                                                 │
 ╰────────────────────────────────────────────────────────────╯
 请选择 [0-13] >
 ```
@@ -141,7 +145,7 @@ GITHUB_TOKEN=ghp_xxx ./scripts/fetch-private.sh --dest ./src
 
 ```bash
 # 固定版本（推荐，内容不可变，不受 CDN 缓存影响）
-curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.8/fail2ban/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.9/fail2ban/install.sh \
   | bash -s -- install --port 2222 -y
 
 # 跟随 main（会被 CDN 缓存，实测可能数天不更新，不建议用于生产）
@@ -151,11 +155,11 @@ curl -fsSL https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh \
 
 | 用途 | 地址 |
 |------|------|
-| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.8/fail2ban/install.sh` |
+| 固定版本（推荐） | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.9/fail2ban/install.sh` |
 | 最新 main | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@main/fail2ban/install.sh` |
-| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.8/fail2ban/` |
+| 浏览目录 | `https://cdn.jsdelivr.net/gh/Swordee/NEW1@v1.0.9/fail2ban/` |
 
-说明：`@v1.0.8` 是标签，内容固定、**不受缓存影响**，请优先使用。
+说明：`@v1.0.9` 是标签，内容固定、**不受缓存影响**，请优先使用。
 `@main` 会随分支更新，但 jsDelivr 对分支有较长缓存（实测主动 purge 后仍可能返回旧内容），
 因此不要把它当"最新版"依赖；急用时在 URL 后加 `?t=时间戳` 也未必生效。
 
