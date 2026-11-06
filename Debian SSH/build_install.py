@@ -20,7 +20,7 @@ ROOT = os.path.dirname(HERE)
 
 TEMPLATE = os.path.join(HERE, "install.template")
 OUTPUT = os.path.join(HERE, "install.sh")
-INSTALLER_VERSION = "1.1.2"
+INSTALLER_VERSION = "1.1.3"
 
 # (源文件相对仓库根的路径, 包内名称)
 FILES = [

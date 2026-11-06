@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# remove_old_ssh_port.sh —— 过渡期结束后，安全移除旧 SSH 端口的收尾脚本 (v2.8)
+# remove_old_ssh_port.sh —— 过渡期结束后，安全移除旧 SSH 端口的收尾脚本 (v2.9)
 #
 # 使用场景：
 #   在 change_ssh_port.sh 中选择「临时保留旧端口」后，确认新端口登录正常，
@@ -18,18 +18,23 @@
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.8"
+readonly SCRIPT_VERSION="2.9"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
 
-RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
-CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+# 非终端 / NO_COLOR 时禁用颜色；输出统一用 printf，不用 echo -e
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+    CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; NC=''
+fi
 
-info() { echo -e "${CYAN}[信息]${NC} $*"; }
-ok()   { echo -e "${GREEN}[完成]${NC} $*"; }
-warn() { echo -e "${YELLOW}[警告]${NC} $*"; }
-err()  { echo -e "${RED}[错误]${NC} $*"; }
+info() { printf '%s\n' "${CYAN}[信息]${NC} $*"; }
+ok()   { printf '%s\n' "${GREEN}[完成]${NC} $*"; }
+warn() { printf '%s\n' "${YELLOW}[警告]${NC} $*"; }
+err()  { printf '%s\n' "${RED}[错误]${NC} $*"; }
 
 # 交互读取：stdin 不是终端时（如 curl | bash 管道执行）改从 /dev/tty 读取
 # 用法：ans="$(prompt "提示文字")" || ans=""
@@ -43,7 +48,7 @@ prompt() {
     # 会被 2>/dev/null 一起吞掉，表现为"光标停住但没有任何提示"。
     if [[ -t 0 ]]; then
         printf '%s' "$__text" >&2
-        read -r __ans
+        read -r __ans || return 1
     elif _tty_ok; then
         printf '%s' "$__text" >&2
         read -r __ans < /dev/tty 2>/dev/null || return 1
@@ -55,7 +60,7 @@ prompt() {
 
 log() {
     local ts; ts="$(date '+%F %T')"
-    echo "[$ts] [remove v${SCRIPT_VERSION}] $*" >> "$LOG_FILE" 2>/dev/null || true
+    printf '[%s] [remove v%s] %s\n' "$ts" "$SCRIPT_VERSION" "$*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 # 重启 SSH 服务：不同发行版服务名可能是 ssh 或 sshd
@@ -105,6 +110,10 @@ get_ports() {
         | awk '{print $2}' | sort -un || true
 }
 
+get_effective_ports() {
+    sshd -T 2>/dev/null | awk '/^port /{print $2}' | sort -un || true
+}
+
 port_listening() {
     local port="$1"
     # 第 4 列为 Local Address:Port；表头该列不含端口号，故无需跳过首行
@@ -129,15 +138,16 @@ rollback_if_needed() {
         err "已回滚。"
         log "ROLLBACK rc=$rc"
     fi
+    # 显式成功退出，避免 set -e 下 trap 末尾状态污染原始退出码
+    return 0
 }
 trap rollback_if_needed EXIT
 
 main() {
-    echo -e "${BOLD}==================================================${NC}"
-    echo -e "${BOLD}       安全移除旧 SSH 端口  v${SCRIPT_VERSION}${NC}"
-    echo -e "${BOLD}==================================================${NC}"
-    echo
-
+    printf '%s\n' "${BOLD}==================================================${NC}"
+    printf '%s\n' "${BOLD}       安全移除旧 SSH 端口  v${SCRIPT_VERSION}${NC}"
+    printf '%s\n' "${BOLD}==================================================${NC}"
+    printf '\n'
     if [[ $EUID -ne 0 ]]; then
         err "请使用 root 权限运行（例如：sudo bash $0）"
         exit 1
@@ -148,8 +158,25 @@ main() {
     mapfile -t ports < <(get_ports)
 
     if [[ ${#ports[@]} -eq 0 ]]; then
-        err "配置中未找到 Port 行（可能使用默认端口 22），无需移除。"
+        err "配置中未找到 Port 行（可能使用默认端口 22，或 Port 写在 Include 文件里），无需移除。"
         exit 1
+    fi
+
+    # 主配置里看不到、但 sshd 实际在监听的端口，说明 Port 定义在 Include 文件。
+    # 本脚本只能删主配置中的 Port 行，必须明确告知，避免"以为移除了其实还在"。
+    local effective p extra=""
+    effective="$(get_effective_ports)"
+    if [[ -n "$effective" ]]; then
+        while IFS= read -r p; do
+            [[ -z "$p" ]] && continue
+            if ! printf '%s\n' "${ports[@]}" | grep -qx "$p"; then
+                extra+=" $p"
+            fi
+        done <<< "$effective"
+    fi
+    if [[ -n "$extra" ]]; then
+        warn "sshd 还在监听${extra}，这些端口来自 Include 配置，本脚本无法移除。"
+        warn "请手动编辑对应文件，或运行 change_ssh_port.sh 重新写入 Port。"
     fi
 
     info "当前生效端口：${BOLD}${ports[*]}${NC}"
@@ -173,7 +200,7 @@ main() {
         fi
     else
         while true; do
-            TARGET="$(prompt "$(echo -e "${CYAN}请输入要移除的端口（其余保留）：${NC}")")" || TARGET=""
+            TARGET="$(prompt "${CYAN}请输入要移除的端口（其余保留）：${NC}")" || TARGET=""
             if ! [[ "$TARGET" =~ ^[0-9]+$ ]]; then
                 err "请输入数字端口。"; continue
             fi
@@ -197,7 +224,7 @@ main() {
         exit 1
     fi
 
-    echo
+    printf '\n'
     warn "即将移除端口 ${BOLD}${TARGET}${NC}，保留：${BOLD}${remain[*]}${NC}"
 
     if [[ $DRY_RUN -eq 1 ]]; then
@@ -206,7 +233,7 @@ main() {
     fi
 
     if [[ $ASSUME_YES -ne 1 ]]; then
-        c="$(prompt "$(echo -e "${CYAN}确认执行吗？(y/N) ${NC}")")" || c=""
+        c="$(prompt "${CYAN}确认执行吗？(y/N) ${NC}")" || c=""
         [[ "$c" == [yY] ]] || { info "已取消操作。"; exit 0; }
     fi
 
@@ -260,10 +287,10 @@ main() {
         ok "已验证剩余端口处于监听状态。"
     fi
 
-    echo
+    printf '\n'
     ok "完成。当前剩余端口：${BOLD}$(get_ports | tr '\n' ' ')${NC}"
-    echo -e "${YELLOW}请保持当前会话，另开窗口用剩余端口登录验证后再断开。${NC}"
-    echo -e "${YELLOW}如需回滚：cp ${BACKUP_FILE} ${SSHD_CONFIG} && systemctl restart ssh${NC}"
+    printf '%s\n' "${YELLOW}请保持当前会话，另开窗口用剩余端口登录验证后再断开。${NC}"
+    printf '%s\n' "${YELLOW}如需回滚：cp ${BACKUP_FILE} ${SSHD_CONFIG} && systemctl restart ssh${NC}"
 
     log "removed port $TARGET, remain=$(get_ports | tr '\n' ' ')"
 }

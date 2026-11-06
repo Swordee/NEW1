@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.8)
+# ssh_menu.sh —— Debian SSH 端口管理 · 交互式面板 (v2.9)
 #
 # 用途：
 #   安装完成后，在命令行输入 `sshh` 即可打开本面板（安装器会注入 alias）。
@@ -19,7 +19,7 @@
 
 set -uo pipefail
 
-readonly SCRIPT_VERSION="2.8"
+readonly SCRIPT_VERSION="2.9"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
@@ -47,7 +47,8 @@ prompt() {
     # 会被 2>/dev/null 一起吞掉，表现为"光标停住但没有任何提示"。
     if [[ -t 0 ]]; then
         printf '%s' "$__text" >&2
-        read -r __ans
+        # Ctrl-D / EOF 必须返回非 0：否则主菜单会拿到空串并无限重绘
+        read -r __ans || return 1
     elif _tty_ok; then
         printf '%s' "$__text" >&2
         read -r __ans < /dev/tty 2>/dev/null || return 1
@@ -84,6 +85,15 @@ as_root() {
         return $?
     fi
     err "需要 root 权限，但系统未安装 sudo，请以 root 身份重新运行。"
+    return 1
+}
+
+# 服务名在不同发行版可能是 ssh 或 sshd，systemd / sysv 也要都试
+restart_service() {
+    as_root systemctl restart ssh  2>/dev/null && return 0
+    as_root systemctl restart sshd 2>/dev/null && return 0
+    as_root service ssh restart    2>/dev/null && return 0
+    as_root service sshd restart   2>/dev/null && return 0
     return 1
 }
 
@@ -218,6 +228,36 @@ host_summary() {
 }
 
 # ---------- 面板渲染 ----------
+# bash 的 %-9s 按「字符数」补空格，中文在终端是双宽，混排时冒号对不齐。
+# 这里统一按显示宽度计算（ASCII / 拉丁符号 1 列、CJK 2 列）。
+DW=0
+PADDED=""
+display_width() {
+    local s="$1" i c code=0 w=0
+    for (( i = 0; i < ${#s}; i++ )); do
+        c="${s:i:1}"
+        printf -v code '%d' "'$c"
+        # 0xA0-0xFF 含 · 等拉丁符号，终端按 1 列显示
+        if (( (code >= 32 && code < 127) || (code >= 160 && code <= 255) )); then
+            w=$((w + 1))
+        else
+            w=$((w + 2))
+        fi
+    done
+    DW=$w
+}
+
+pad_label() {
+    local s="$1" target=12 w
+    display_width "$s"
+    w=$DW
+    PADDED="$s"
+    while (( w < target )); do
+        PADDED+=" "
+        w=$((w + 1))
+    done
+}
+
 draw_header() {
     local ports listen svc fw valid backup
     ports="$(effective_ports)"
@@ -237,16 +277,23 @@ draw_header() {
     valid="$(config_valid)"
     backup="$(last_backup)"
 
+    local title="Debian SSH · 端口管理面板" ver="v${SCRIPT_VERSION}"
+    local gap=16 left=3 right mid_pad="" end_pad=""
+    display_width "$title"
+    right=$(( 62 - left - DW - gap - ${#ver} ))
+    (( right < 1 )) && right=1
+    printf -v mid_pad '%*s' "$gap" ''
+    printf -v end_pad '%*s' "$right" ''
     printf '%s\n' "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    printf '%s\n' "${CYAN}║${NC}   ${BOLD}Debian SSH · 端口管理面板${NC}                ${BLUE}v${SCRIPT_VERSION}${NC}          ${CYAN}║${NC}"
+    printf '%s\n' "${CYAN}║${NC}   ${BOLD}${title}${NC}${mid_pad}${BLUE}${ver}${NC}${end_pad}${CYAN}║${NC}"
     printf '%s\n' "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
-    printf '  %s%-9s%s: %s\n' "$DIM" "主机" "$NC" "$(host_summary)"
-    printf '  %s%-9s%s: %s\n' "$DIM" "当前端口" "$NC" "$(printf '%s' "$ports" | tr '\n' ' ')"
-    printf '  %s%-9s%s:%s\n' "$DIM" "端口监听" "$NC" "$listen"
-    printf '  %s%-9s%s: %s\n' "$DIM" "服务状态" "$NC" "$svc"
-    printf '  %s%-9s%s: %s\n' "$DIM" "防火墙" "$NC" "$fw"
-    printf '  %s%-9s%s: %s\n' "$DIM" "配置校验" "$NC" "$valid"
-    printf '  %s%-9s%s: %s\n' "$DIM" "最近备份" "$NC" "$backup"
+    pad_label "主机";     printf '  %s%s%s: %s\n' "$DIM" "$PADDED" "$NC" "$(host_summary)"
+    pad_label "当前端口"; printf '  %s%s%s: %s\n' "$DIM" "$PADDED" "$NC" "$(printf '%s' "$ports" | tr '\n' ' ')"
+    pad_label "端口监听"; printf '  %s%s%s:%s\n' "$DIM" "$PADDED" "$NC" "$listen"
+    pad_label "服务状态"; printf '  %s%s%s: %s\n' "$DIM" "$PADDED" "$NC" "$svc"
+    pad_label "防火墙";   printf '  %s%s%s: %s\n' "$DIM" "$PADDED" "$NC" "$fw"
+    pad_label "配置校验"; printf '  %s%s%s: %s\n' "$DIM" "$PADDED" "$NC" "$valid"
+    pad_label "最近备份"; printf '  %s%s%s: %s\n' "$DIM" "$PADDED" "$NC" "$backup"
     printf '%s\n' "${DIM}  ────────────────────────────────────────────────────────────${NC}"
 }
 
@@ -264,7 +311,11 @@ draw_menu() {
 }
 
 clear_screen() {
-    printf '\033[H\033[2J\033[3J'
+    # 输出被重定向到文件时不要写入控制序列
+    if [[ -t 1 ]]; then
+        printf '\033[H\033[2J\033[3J'
+    fi
+    return 0
 }
 
 pause_enter() {
@@ -353,7 +404,7 @@ do_backup() {
     done
 
     local ans
-    ans="$(prompt "$(echo -e "${CYAN}输入要回滚的编号（直接回车返回）：${NC}")")" || ans=""
+    ans="$(prompt "${CYAN}输入要回滚的编号（直接回车返回）：${NC}")" || ans=""
     if [[ -z "$ans" ]]; then
         return 0
     fi
@@ -365,7 +416,7 @@ do_backup() {
     local target="${files[$((ans - 1))]}"
     warn "将用备份回滚当前配置：$target"
     local c
-    c="$(prompt "$(echo -e "${CYAN}确认回滚？(y/N) ${NC}")")" || c=""
+    c="$(prompt "${CYAN}确认回滚？(y/N) ${NC}")" || c=""
     if [[ "$c" != [yY] ]]; then
         info "已取消。"
         return 0
@@ -381,8 +432,7 @@ do_backup() {
     fi
     if as_root sshd -t >/dev/null 2>&1; then
         as_root rm -f "$pre" 2>/dev/null || true
-        if as_root systemctl restart ssh 2>/dev/null \
-            || as_root service ssh restart 2>/dev/null; then
+        if restart_service; then
             ok "已回滚并重启 SSH 服务。"
         else
             warn "已回滚，但服务重启失败，请手动检查：systemctl status ssh"
@@ -417,7 +467,7 @@ do_firewall() {
     fi
 
     local ans
-    ans="$(prompt "$(echo -e "${CYAN}是否为当前端口 ${BOLD}${ports//$'\n'/ }${NC} 补充放行规则？(y/N) ${NC}")")" || ans=""
+    ans="$(prompt "${CYAN}是否为当前端口 ${BOLD}${ports//$'\n'/ }${NC} 补充放行规则？(y/N) ${NC}")" || ans=""
     if [[ "$ans" == [yY] ]]; then
         local p
         while IFS= read -r p; do
@@ -428,6 +478,12 @@ do_firewall() {
                 else
                     warn "ufw 放行 ${p}/tcp 失败"
                 fi
+            elif command -v nft >/dev/null 2>&1; then
+                # 现代 Debian 上 nft 与 iptables（nft 兼容层）同时存在，
+                # 必须先判断 nft，否则会静默走到 iptables 分支、规则插错链。
+                # nft 的规则位置因发行版而异，不自动改，只给出需手动执行的命令。
+                warn "nftables 需手动放行 ${p}/tcp："
+                printf '      nft add rule inet filter input tcp dport %s accept\n' "$p"
             elif command -v iptables >/dev/null 2>&1; then
                 if as_root iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null; then
                     ok "iptables 规则已存在（${p}/tcp）"
@@ -436,10 +492,6 @@ do_firewall() {
                 else
                     warn "iptables 放行 ${p}/tcp 失败"
                 fi
-            elif command -v nft >/dev/null 2>&1; then
-                # nft 的规则位置因发行版而异，不自动改，避免把规则插错表/链
-                warn "nftables 需手动放行 ${p}/tcp："
-                printf '      nft add rule inet filter input tcp dport %s accept\n' "$p"
             fi
         done <<< "$ports"
     fi
@@ -449,17 +501,13 @@ do_restart() {
     printf '\n'
     warn "重启 SSH 服务会短暂中断连接（当前会话不受影响）。"
     local c
-    c="$(prompt "$(echo -e "${CYAN}确认重启？(y/N) ${NC}")")" || c=""
+    c="$(prompt "${CYAN}确认重启？(y/N) ${NC}")" || c=""
     if [[ "$c" != [yY] ]]; then
         info "已取消。"
         return 0
     fi
-    if as_root systemctl restart ssh 2>/dev/null; then
-        ok "ssh 已重启。"
-    elif as_root systemctl restart sshd 2>/dev/null; then
-        ok "sshd 已重启。"
-    elif as_root service ssh restart 2>/dev/null; then
-        ok "ssh 已重启（service）。"
+    if restart_service; then
+        ok "SSH 服务已重启。"
     else
         err "重启失败，请手动检查：systemctl status ssh"
         return 1
@@ -487,11 +535,25 @@ do_logs() {
     printf '\n'
 }
 
+# 安装目录由 root 拥有，普通用户删不掉；且脚本自身就在该目录里，
+# 不能在函数执行中直接删。放到 EXIT trap 里、以 root 身份在退出时删。
+UNINSTALL_DIR=""
+finish_uninstall() {
+    if [[ -n "$UNINSTALL_DIR" ]]; then
+        if as_root rm -rf "$UNINSTALL_DIR" 2>/dev/null; then
+            ok "已删除安装目录：$UNINSTALL_DIR"
+        else
+            warn "安装目录删除失败，请手动执行：sudo rm -rf $UNINSTALL_DIR"
+        fi
+    fi
+    return 0
+}
+
 do_uninstall() {
     printf '\n%s\n' "${BOLD}── 卸载 ──${NC}"
 
     # 安全检查：TOOL_DIR 异常时绝不执行 rm -rf
-    if [[ -z "$TOOL_DIR" || "$TOOL_DIR" == "/" || "$TOOL_DIR" == "$HOME" ]]; then
+    if [[ -z "$TOOL_DIR" || "$TOOL_DIR" == "/" || "$TOOL_DIR" == "${HOME:-}" ]]; then
         err "安装目录异常（${TOOL_DIR:-空}），已中止卸载以防误删。"
         err "请手动清理，或重新运行 install.sh --uninstall"
         return 1
@@ -500,15 +562,14 @@ do_uninstall() {
     warn "将删除安装目录、软链，并从 shell 配置中移除 sshh 别名。"
     printf '  安装目录: %s\n' "$TOOL_DIR"
     local c
-    c="$(prompt "$(echo -e "${CYAN}确认卸载？(y/N) ${NC}")")" || c=""
+    c="$(prompt "${CYAN}确认卸载？(y/N) ${NC}")" || c=""
     if [[ "$c" != [yY] ]]; then
         info "已取消。"
         return 0
     fi
 
-    # 清理 alias 注入块
     # sudo 下 $HOME 是 /root，需反查 SUDO_USER 的真实 home，否则普通用户的配置清不掉
-    local target_home="$HOME" h
+    local target_home="${HOME:-/root}" h
     if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
         if command -v getent >/dev/null 2>&1; then
             h="$(getent passwd "$SUDO_USER" 2>/dev/null | awk -F: '{print $6; exit}')" || h=""
@@ -526,31 +587,43 @@ do_uninstall() {
     fi
     for home in "${homes[@]}"; do
         for rc in "$home/.bashrc" "$home/.zshrc"; do
-            [[ -f "$rc" ]] || continue
-            if grep -q 'ssh-port-tool' "$rc" 2>/dev/null; then
-                if sed -i '/^# >>> ssh-port-tool >>>$/,/^# <<< ssh-port-tool <<<$/d' "$rc" 2>/dev/null; then
-                    ok "已清理别名配置：$rc"
-                else
-                    warn "清理别名失败，请手动编辑：$rc"
+            if [[ -r "$rc" ]]; then
+                if grep -qF '# >>> ssh-port-tool >>>' "$rc" 2>/dev/null; then
+                    if sed -i '/^# >>> ssh-port-tool >>>$/,/^# <<< ssh-port-tool <<<$/d' "$rc" 2>/dev/null; then
+                        ok "已清理别名配置：$rc"
+                    else
+                        warn "清理别名失败，请手动编辑：$rc"
+                    fi
+                fi
+            else
+                # /root 下的 rc 普通用户读不到，必须提权，否则会静默残留
+                if as_root grep -qF '# >>> ssh-port-tool >>>' "$rc" 2>/dev/null; then
+                    if as_root sed -i '/^# >>> ssh-port-tool >>>$/,/^# <<< ssh-port-tool <<<$/d' "$rc" 2>/dev/null; then
+                        ok "已清理别名配置：$rc"
+                    else
+                        warn "清理别名失败，请手动编辑：$rc"
+                    fi
                 fi
             fi
         done
     done
 
-    # 清理软链（与安装器创建的 4 个保持一致）
+    # 清理软链（与安装器创建的 4 个保持一致）；/usr/local/bin 需要 root 权限
     local link
     for link in /usr/local/bin/ssh-port /usr/local/bin/ssh-port-menu \
                 /usr/local/bin/ssh-port-change /usr/local/bin/ssh-port-remove; do
-        if [[ -L "$link" ]]; then
-            rm -f "$link" && ok "已删除软链：$link"
+        if [[ -L "$link" || -e "$link" ]]; then
+            if as_root rm -f "$link" 2>/dev/null; then
+                ok "已删除软链：$link"
+            else
+                warn "删除软链失败，请手动执行：sudo rm -f $link"
+            fi
         fi
     done
 
-    # 删除安装目录（脚本自身位于其中，需等脚本退出后再删）
-    printf '  安装目录将在本脚本退出后删除：%s\n' "$TOOL_DIR"
-    ( sleep 2; rm -rf "$TOOL_DIR" ) >/dev/null 2>&1 &
-    disown 2>/dev/null || true
-    ok "卸载完成。请重新打开终端使别名生效。"
+    UNINSTALL_DIR="$TOOL_DIR"
+    trap finish_uninstall EXIT
+    ok "卸载完成。退出后将删除 $TOOL_DIR，请重新打开终端使别名生效。"
 }
 
 # ---------- 非交互状态输出 ----------
@@ -595,7 +668,7 @@ main() {
     local mode="${1:-menu}"
     case "$mode" in
         --status)  print_status; return 0 ;;
-        --version) echo "ssh_menu.sh v${SCRIPT_VERSION}"; return 0 ;;
+        --version) printf 'ssh_menu.sh v%s\n' "$SCRIPT_VERSION"; return 0 ;;
         -h|--help) usage; return 0 ;;
         --menu)    ;;
         *)         err "未知参数: $mode"; usage; return 1 ;;
@@ -610,7 +683,13 @@ main() {
         draw_header
         draw_menu
         local ans
-        ans="$(prompt "$(echo -e "${CYAN}请选择 [0-8]：${NC}")")" || ans=""
+        # prompt 返回非 0 表示 Ctrl-D / 无可用终端：直接退出，
+        # 否则会拿到空串并在 while true 里无限重绘菜单。
+        if ! ans="$(prompt "${CYAN}请选择 [0-8]：${NC}")"; then
+            clear_screen
+            printf '%s\n' "${DIM}已退出。${NC}"
+            return 0
+        fi
         case "$ans" in
             1) show_detail; pause_enter ;;
             2) do_change_port; pause_enter ;;

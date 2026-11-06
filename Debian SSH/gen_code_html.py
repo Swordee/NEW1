@@ -19,6 +19,16 @@ FILES = [
 
 # 本次修复清单
 FIXES = [
+    ("change · EXIT trap", "`[[ ... ]] && rm` 作为 trap 最后一条命令在 set -e 下失败，把成功退出码改成 1（dry-run 成功却报错），并掩盖真实错误码", "trap 改 if 清理 + 显式 return 0，清理命令加 || true"),
+    ("change · 回滚链", "sshd -t 失败时只手工还原主配置并置 CHANGED=0，trap 不再触发，Include 里被注释的 Port 残留", "抽出统一 restore_all()，显式失败路径与 trap 都走同一入口"),
+    ("change · 旧端口推导", "旧端口只从主配置取；Port 写在 Include 时退回默认 22，保留旧端口会凭空多开 22", "以 sshd -T 的生效端口为准"),
+    ("change · 临时文件", "第二个 mktemp 未登记清理，中途失败会残留；重复运行顶部堆积旧标题行", "统一 TMP_FILES 登记，写入时清除本工具旧标题"),
+    ("ssh_menu · 卸载权限", "面板以普通用户运行时删不掉 root 拥有的软链、安装目录与 /root 的 rc，却提示卸载完成", "全部走 as_root，目录放到 EXIT trap 以 root 删除并校验"),
+    ("ssh_menu · 主循环 EOF", "read 遇 Ctrl-D 返回 1 但 prompt 仍返回 0 + 空串，主菜单无限重绘", "read ... || return 1，主循环据此正常退出"),
+    ("ssh_menu · 渲染", "%-9s 按字符数补中文，冒号错位；表头右竖线写死空格，比边框少 4 列", "display_width() 按终端双宽动态补齐"),
+    ("ssh_menu · 服务与防火墙", "回滚/重启只试 ssh 服务名；iptables 分支挡住 nft，现代 Debian 上静默走错", "统一 restart_service()，放行顺序改为 ufw → nft → iptables"),
+    ("全部脚本 · 输出", "颜色已是真实 ESC 却仍用 echo -e，会误解释参数里的反斜杠；prompt \"$(echo -e ...)\" 每次多起子 shell", "统一 printf '%s\\n' + TTY/NO_COLOR 开关，去掉嵌套子 shell"),
+    ("install.template · 别名注入", "用户没有 .bashrc / .zshrc 时静默跳过注入，却提示已注入，装完 sshh 命令不存在", "自动补建 .bashrc 并还原属主，按实际写入数输出结果"),
     ("全部脚本 · prompt()", "`{ read -p \"提示\" x; } 2>/dev/null` 把提示（走 stderr）和错误噪音一起丢掉，curl | bash 安装时卡住无提示", "提示改用 printf 单独写 stderr，read 不再带 -p"),
     ("全部脚本 · 颜色变量", "颜色存的是字面量 \\033[0;32m，面板用 printf '%s' 不会解释，终端满屏 \\033[0;36m", "改用 $'\\033[..' 存真实 ESC 字节，printf / echo 都能正确上色"),
     ("install.template · 别名落点", "把 $SUDO_USER 当目录用（它是用户名），sudo 安装时普通用户 rc 被静默跳过，装完 sshh 不生效", "改用 getent passwd 反查真实 home"),
@@ -201,7 +211,7 @@ html_doc = f'''<!DOCTYPE html>
 <header class="hero">
   <div class="wrap">
     <h1>Debian SSH 端口更换工具</h1>
-    <p class="sub">代码展示与审计报告 · v2.8</p>
+    <p class="sub">代码展示与审计报告 · v2.9</p>
     <div class="chips">
       <span class="chip">输入 sshh 进交互面板</span>
       <span class="chip">自动备份 / 校验 / 回滚</span>
@@ -239,7 +249,7 @@ html_doc = f'''<!DOCTYPE html>
   {''.join(cards_html)}
 
   <footer>
-    由 pygments 生成 · 浅色主题 · 支持离线打开 · 最后更新 2026-11-02
+    由 pygments 生成 · 浅色主题 · 支持离线打开 · 最后更新 2026-11-06
   </footer>
 </div>
 </body>

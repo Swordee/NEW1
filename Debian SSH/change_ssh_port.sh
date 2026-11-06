@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# change_ssh_port.sh —— Debian 交互式/半自动 SSH 端口更换脚本 (v2.8)
+# change_ssh_port.sh —— Debian 交互式/半自动 SSH 端口更换脚本 (v2.9)
 #
 # 相对 v1 的改进：
 #   + 支持命令行参数（-p 端口 / -y 自动确认 / --keep-old / --no-firewall / -n 预演）
@@ -19,19 +19,25 @@
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.8"
+readonly SCRIPT_VERSION="2.9"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
 readonly BACKUP_DIR="/etc/ssh/sshd_config_backups"
 readonly LOG_FILE="/var/log/change_ssh_port.log"
 
-# ---------- 颜色 ----------
-RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
-CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+# ---------- 颜色（非终端 / NO_COLOR 时禁用） ----------
+# 颜色变量存真实 ESC 字节，因此输出一律用 printf '%s\n'，不再用 echo -e。
+# echo -e 会解释参数里的反斜杠（例如路径中的 \t），把内容改坏。
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+    CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; NC=''
+fi
 
-info() { echo -e "${CYAN}[信息]${NC} $*"; }
-ok()   { echo -e "${GREEN}[完成]${NC} $*"; }
-warn() { echo -e "${YELLOW}[警告]${NC} $*"; }
-err()  { echo -e "${RED}[错误]${NC} $*"; }
+info() { printf '%s\n' "${CYAN}[信息]${NC} $*"; }
+ok()   { printf '%s\n' "${GREEN}[完成]${NC} $*"; }
+warn() { printf '%s\n' "${YELLOW}[警告]${NC} $*"; }
+err()  { printf '%s\n' "${RED}[错误]${NC} $*"; }
 
 # 交互读取：stdin 不是终端时（如 curl | bash 管道执行）改从 /dev/tty 读取
 # 用法：ans="$(prompt "提示文字")" || ans=""
@@ -45,7 +51,8 @@ prompt() {
     # 会被 2>/dev/null 一起吞掉，表现为"光标停住但没有任何提示"。
     if [[ -t 0 ]]; then
         printf '%s' "$__text" >&2
-        read -r __ans
+        # read 失败（Ctrl-D / EOF）必须返回非 0，否则调用方会拿到空串并继续循环
+        read -r __ans || return 1
     elif _tty_ok; then
         printf '%s' "$__text" >&2
         read -r __ans < /dev/tty 2>/dev/null || return 1
@@ -57,7 +64,7 @@ prompt() {
 
 log() {
     local ts; ts="$(date '+%F %T')"
-    echo "[$ts] [v${SCRIPT_VERSION}] $*" >> "$LOG_FILE" 2>/dev/null || true
+    printf '[%s] [v%s] %s\n' "$ts" "$SCRIPT_VERSION" "$*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 # 重启 SSH 服务：不同发行版服务名可能是 ssh 或 sshd
@@ -191,14 +198,14 @@ handle_includes() {
 
     warn "以下被 Include 的配置文件中也定义了 Port，若不处理会继续监听旧端口："
     for f in "${hits[@]}"; do
-        echo -e "    ${YELLOW}$f${NC}: $(grep -E '^[[:space:]]*Port[[:space:]]+' "$f" | tr '\n' ' ')"
+        printf '%s\n' "    ${YELLOW}$f${NC}: $(grep -E '^[[:space:]]*Port[[:space:]]+' "$f" | tr '\n' ' ')"
     done
 
     local ans
     if [[ $ASSUME_YES -eq 1 ]]; then
         ans="y"
     else
-        ans="$(prompt "$(echo -e "${CYAN}是否将这些 Include 文件中的 Port 指令注释掉？(Y/n) ${NC}")")" || ans=""
+        ans="$(prompt "${CYAN}是否将这些 Include 文件中的 Port 指令注释掉？(Y/n) ${NC}")" || ans=""
     fi
     case "$ans" in
         [nN]) warn "保留 Include 中的 Port，旧端口可能仍生效，请知悉。"; return 0 ;;
@@ -224,9 +231,9 @@ configure_firewall() {
     elif [[ $ASSUME_YES -eq 1 ]]; then
         ans="yes"
     else
-        echo
+        printf '\n'
         info "放行新端口 $port 的防火墙规则（否则可能连不上）。"
-        ans="$(prompt "$(echo -e "${CYAN}现在配置防火墙放行 $port 吗？(Y/n) ${NC}")")" || ans=""
+        ans="$(prompt "${CYAN}现在配置防火墙放行 $port 吗？(Y/n) ${NC}")" || ans=""
     fi
     case "$ans" in
         no|[nN]) warn "已跳过防火墙配置，请手动放行端口 $port。"; return ;;
@@ -257,17 +264,19 @@ configure_firewall() {
 BACKUP_FILE=""
 CHANGED=0
 TMP_BODY=""
+# 所有 mktemp 产物都登记在此，EXIT 时统一清理（含中途失败的情况）
+TMP_FILES=()
 # 被注释掉 Port 的 Include 文件：每项格式 "源文件|备份文件"
 INCLUDE_BACKUPS=()
 
-on_exit() {
-    local rc=$?
-    # 先兜底回滚
-    if [[ $rc -ne 0 && $CHANGED -eq 1 && -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
-        err "检测到异常，正在回滚 sshd_config ..."
+# 统一回滚入口：主配置 + Include 文件 + 重启服务。
+# 显式失败路径与 EXIT trap 都走这里，避免「只回滚主配置、Include 残留」。
+restore_all() {
+    local pair src bak
+    if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         cp -p "$BACKUP_FILE" "$SSHD_CONFIG" 2>/dev/null || true
-        # Include 文件同样要还原，否则改动会残留
-        local pair src bak
+    fi
+    if [[ ${#INCLUDE_BACKUPS[@]} -gt 0 ]]; then
         for pair in "${INCLUDE_BACKUPS[@]}"; do
             src="${pair%%|*}"
             bak="${pair#*|}"
@@ -276,12 +285,26 @@ on_exit() {
                 log "restored include: $src"
             fi
         done
-        restart_ssh || true
-        err "已回滚到修改前状态（含 Include 文件）。"
+    fi
+    restart_ssh || true
+}
+
+on_exit() {
+    local rc=$? f
+    if [[ $rc -ne 0 && $CHANGED -eq 1 ]]; then
+        err "检测到异常，正在回滚配置（含 Include 文件）..."
+        restore_all
+        err "已回滚到修改前状态。"
         log "ROLLBACK triggered, rc=$rc"
     fi
-    # 再清理临时文件
-    [[ -n "${TMP_BODY:-}" && -f "${TMP_BODY:-}" ]] && rm -f "$TMP_BODY"
+    if [[ ${#TMP_FILES[@]} -gt 0 ]]; then
+        for f in "${TMP_FILES[@]}"; do
+            if [[ -n "$f" && -f "$f" ]]; then rm -f "$f" 2>/dev/null || true; fi
+        done
+    fi
+    # 必须显式返回 0：set -e 下 trap 末尾命令失败会把原始退出码改成 1，
+    # 导致 dry-run 明明成功却返回失败。
+    return 0
 }
 trap on_exit EXIT
 
@@ -290,22 +313,26 @@ apply_config() {
 
     if [[ $DRY_RUN -eq 1 ]]; then
         info "[预演] 将写入的 Port 指令："
-        [[ "$keep_old" == "yes" ]] && echo -e "    ${BOLD}Port $old_port${NC}   (保留旧端口)"
-        echo -e "    ${BOLD}Port $new_port${NC}"
+        [[ "$keep_old" == "yes" ]] && printf '%s\n' "    ${BOLD}Port $old_port${NC}   (保留旧端口)"
+        printf '%s\n' "    ${BOLD}Port $new_port${NC}"
         info "[预演] 其余配置保持不变；不写文件、不重启服务。"
         return 0
     fi
 
     TMP_BODY="$(mktemp)"
-    # 删除主配置中所有 Port 指令（含被注释的），避免重复/冲突
-    grep -vE '^[[:space:]]*#?[[:space:]]*Port[[:space:]]+[0-9]+[[:space:]]*(#.*)?$' "$SSHD_CONFIG" > "$TMP_BODY" || true
+    TMP_FILES+=("$TMP_BODY")
+    # 删除主配置中所有 Port 指令（含被注释的），避免重复/冲突；
+    # 同时清掉本工具历次运行留下的旧标题行，避免反复运行后顶部堆积。
+    grep -vE '^[[:space:]]*#?[[:space:]]*Port[[:space:]]+[0-9]+[[:space:]]*(#.*)?$|^# === change_ssh_port\.sh v[0-9.]+ @ .* ===$' \
+        "$SSHD_CONFIG" > "$TMP_BODY" || true
 
     local new_content; new_content="$(mktemp)"
+    TMP_FILES+=("$new_content")
     {
-        echo "# === change_ssh_port.sh v${SCRIPT_VERSION} @ $(date '+%F %T') ==="
-        [[ "$keep_old" == "yes" ]] && echo "Port $old_port"
-        echo "Port $new_port"
-        echo ""
+        printf '# === change_ssh_port.sh v%s @ %s ===\n' "$SCRIPT_VERSION" "$(date '+%F %T')"
+        [[ "$keep_old" == "yes" ]] && printf 'Port %s\n' "$old_port"
+        printf 'Port %s\n' "$new_port"
+        printf '\n'
         cat "$TMP_BODY"
     } > "$new_content"
 
@@ -318,11 +345,10 @@ apply_config() {
 
 # ---------- 主流程 ----------
 main() {
-    echo -e "${BOLD}==================================================${NC}"
-    echo -e "${BOLD}     Debian SSH 端口更换脚本  v${SCRIPT_VERSION}${NC}"
-    echo -e "${BOLD}==================================================${NC}"
-    echo
-
+    printf '%s\n' "${BOLD}==================================================${NC}"
+    printf '%s\n' "${BOLD}     Debian SSH 端口更换脚本  v${SCRIPT_VERSION}${NC}"
+    printf '%s\n' "${BOLD}==================================================${NC}"
+    printf '\n'
     require_root
 
     [[ -f "$SSHD_CONFIG" ]] || { err "未找到 $SSHD_CONFIG"; exit 1; }
@@ -333,10 +359,13 @@ main() {
         exit 1
     fi
 
-    local old_port current_ports
-    old_port="$(get_config_ports | awk 'NR==1{print; exit}')"
-    old_port="${old_port:-22}"
+    local old_port current_ports config_port
+    config_port="$(get_config_ports | awk 'NR==1{print; exit}')"
     current_ports="$(get_effective_ports)"
+    # 旧端口必须以「生效端口」为准。Port 只写在 Include 文件时主配置里没有
+    # Port 行，若退回默认 22，保留旧端口就会凭空把 22 也打开。
+    old_port="$(printf '%s\n' "$current_ports" | awk 'NR==1{print; exit}')"
+    old_port="${old_port:-${config_port:-22}}"
     [[ -z "$current_ports" ]] && current_ports="$old_port"
 
     info "当前生效 SSH 端口：${BOLD}${current_ports//$'\n'/ }${NC}"
@@ -347,7 +376,7 @@ main() {
         validate_port "$NEW_PORT" "$current_ports" || { err "参数 -p 指定的端口无效"; exit 1; }
     else
         while true; do
-            NEW_PORT="$(prompt "$(echo -e "${CYAN}请输入新的 SSH 端口 (1-65535)：${NC}")")" || NEW_PORT=""
+            NEW_PORT="$(prompt "${CYAN}请输入新的 SSH 端口 (1-65535)：${NC}")" || NEW_PORT=""
             validate_port "$NEW_PORT" "$current_ports" && break
         done
     fi
@@ -357,22 +386,22 @@ main() {
         if [[ $ASSUME_YES -eq 1 ]]; then
             KEEP_OLD="yes"
         else
-            echo
+            printf '\n'
             warn "建议过渡期保留旧端口（$old_port），验证新端口能登录后再关闭。"
-            a="$(prompt "$(echo -e "${CYAN}临时保留旧端口 $old_port 吗？(Y/n) ${NC}")")" || a=""
+            a="$(prompt "${CYAN}临时保留旧端口 $old_port 吗？(Y/n) ${NC}")" || a=""
             case "$a" in [nN]) KEEP_OLD="no" ;; *) KEEP_OLD="yes" ;; esac
         fi
     fi
 
     # 确认
-    echo
+    printf '\n'
     if [[ "$KEEP_OLD" == "yes" ]]; then
         warn "将把 SSH 端口改为 ${BOLD}${NEW_PORT}${NC}，并临时保留旧端口 ${BOLD}${old_port}${NC}。"
     else
         warn "将把 SSH 端口改为 ${BOLD}${NEW_PORT}${NC}（不保留旧端口）。"
     fi
     if [[ $ASSUME_YES -ne 1 && $DRY_RUN -ne 1 ]]; then
-        c="$(prompt "$(echo -e "${CYAN}确认执行吗？(y/N) ${NC}")")" || c=""
+        c="$(prompt "${CYAN}确认执行吗？(y/N) ${NC}")" || c=""
         [[ "$c" == [yY] ]] || { info "已取消操作。"; exit 0; }
     fi
 
@@ -400,10 +429,9 @@ main() {
     info "校验配置语法 (sshd -t) ..."
     if ! sshd -t; then
         err "配置语法校验失败，回滚 ..."
-        cp -p "$BACKUP_FILE" "$SSHD_CONFIG"
-        CHANGED=0
-        restart_ssh || true
-        err "已恢复原配置。"
+        restore_all
+        CHANGED=0          # 已手工回滚，EXIT trap 不再重复执行
+        err "已恢复原配置（含 Include 文件）。"
         log "sshd -t failed, rolled back"
         exit 1
     fi
@@ -434,20 +462,20 @@ main() {
     fi
 
     # 收尾提示
-    echo
-    echo -e "${BOLD}==================================================${NC}"
-    echo -e "${BOLD}               重要安全提示${NC}"
-    echo -e "${BOLD}==================================================${NC}"
-    echo -e "${YELLOW}1.${NC} 请【新开一个终端】用新端口测试登录："
-    echo -e "     ssh -p ${BOLD}${NEW_PORT}${NC} 用户@服务器IP"
-    echo -e "${YELLOW}2.${NC} 确认能登录后，再断开当前会话。"
+    printf '\n'
+    printf '%s\n' "${BOLD}==================================================${NC}"
+    printf '%s\n' "${BOLD}               重要安全提示${NC}"
+    printf '%s\n' "${BOLD}==================================================${NC}"
+    printf '%s\n' "${YELLOW}1.${NC} 请【新开一个终端】用新端口测试登录："
+    printf '%s\n' "     ssh -p ${BOLD}${NEW_PORT}${NC} 用户@服务器IP"
+    printf '%s\n' "${YELLOW}2.${NC} 确认能登录后，再断开当前会话。"
     if [[ "$KEEP_OLD" == "yes" ]]; then
-        echo -e "${YELLOW}3.${NC} 验证通过后运行收尾脚本关闭旧端口："
-        echo -e "     sudo bash remove_old_ssh_port.sh"
+        printf '%s\n' "${YELLOW}3.${NC} 验证通过后运行收尾脚本关闭旧端口："
+        printf '%s\n' "     sudo bash remove_old_ssh_port.sh"
     fi
-    echo -e "${YELLOW}4.${NC} 如需回滚："
-    echo -e "     cp ${BACKUP_FILE} ${SSHD_CONFIG} && systemctl restart ssh"
-    echo -e "${BOLD}==================================================${NC}"
+    printf '%s\n' "${YELLOW}4.${NC} 如需回滚："
+    printf '%s\n' "     cp ${BACKUP_FILE} ${SSHD_CONFIG} && systemctl restart ssh"
+    printf '%s\n' "${BOLD}==================================================${NC}"
 
     log "done: new_port=$NEW_PORT keep_old=$KEEP_OLD listening=$listening"
     ok "执行完毕。"
