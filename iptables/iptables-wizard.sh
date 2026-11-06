@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  iptables-wizard  ·  Debian / Ubuntu 防火墙一键管理脚本   v1.1.0
+#  iptables-wizard  ·  Debian / Ubuntu 防火墙一键管理脚本   v1.2.0
 # ------------------------------------------------------------------------------
 #  功能：
 #    1. 环境检测与安装（iptables / iptables-persistent / netfilter-persistent）
@@ -33,7 +33,7 @@
 set -o pipefail
 
 readonly APP="iptables-wizard"
-readonly VERSION="1.1.0"
+readonly VERSION="1.2.0"
 readonly CONF_DIR="/etc/iptables-wizard"
 readonly BACKUP_DIR="${CONF_DIR}/backups"
 readonly RULES_V4="/etc/iptables/rules.v4"
@@ -68,6 +68,15 @@ ok()   { printf '%b\n' "  ${C_GREEN}✔${C_RESET} $*"; }
 warn() { printf '%b\n' "  ${C_YELLOW}⚠${C_RESET} $*"; }
 err()  { printf '%b\n' "  ${C_RED}✘${C_RESET} $*"; }
 info() { printf '%b\n' "  ${C_DIM}·${C_RESET} $*"; }
+
+# 子菜单统一标题：蓝钻 + 白色标题 + 灰色副标题（替代原先各菜单手写的两行）
+menu_header() {  # menu_header "标题" "副标题"
+  banner
+  printf '%b\n' "  ${C_BLUE}${C_BOLD}◆${C_RESET} ${C_WHITE}${C_BOLD}$1${C_RESET}   ${C_DIM}$2${C_RESET}"
+}
+
+# 分组标签行（主菜单分区用）
+menu_group() { printf '%b\n' "  ${C_DIM}─ $* ──────────────────────────────────────${C_RESET}"; }
 kv() {
   local pad
   dw_calc "$1"
@@ -94,6 +103,10 @@ statusbar() {
     return 0
   fi
   snapshot_state
+  if (( ! ST_OK )); then
+    printf '%b\n' "  ${C_RED}● 无法读取规则${C_RESET} ${C_DIM}（权限不足 / netfilter 不可用，可用 doctor 排查）${C_RESET}"
+    return 0
+  fi
   local in_b fw_b out_b saved svc
   badge_of "${ST_IN}";  in_b="${PB}"
   badge_of "${ST_FW}";  fw_b="${PB}"
@@ -214,14 +227,14 @@ run_eval() {
   return "${st}"
 }
 
-# 危险操作警示框
+# 危险操作警示框（上下边框按显示宽度对齐：顶部前缀 15 列，底部前缀 2 列）
 danger_box() {
   local l
-  printf '%b\n' "  ${C_RED}${C_BOLD}┌ ⚠ 危险操作 ────────────────────────────────────────────${C_RESET}"
+  printf '%b\n' "  ${C_RED}${C_BOLD}┌ ⚠ 危险操作 ───────────────────────────${C_RESET}"
   while IFS= read -r l; do
     [[ -n ${l} ]] && printf '%b\n' "  ${C_RED}${C_BOLD}│${C_RESET} ${C_RED}${l}${C_RESET}"
   done <<< "$1"
-  printf '%b\n' "  ${C_RED}${C_BOLD}└─────────────────────────────────────────────────────────${C_RESET}"
+  printf '%b\n' "  ${C_RED}${C_BOLD}└────────────────────────────────────────${C_RESET}"
 }
 
 # ------------------------------------------------------------ 运行环境与依赖 --
@@ -387,8 +400,12 @@ save_rules() {
   mkdir -p /etc/iptables 2>/dev/null
 
   if svc_exists && cmd_exists netfilter-persistent; then
-    [[ ${quiet} == quiet ]] || run_cmd netfilter-persistent save
-    netfilter-persistent save >/dev/null 2>&1
+    # 只调用一次：既展示命令又拿到真实退出码，失败时提示但不阻断（后面还有 iptables-save 兜底）
+    if [[ ${quiet} == quiet ]]; then
+      netfilter-persistent save >/dev/null 2>&1 || warn "netfilter-persistent save 失败，将仅使用 iptables-save 写入"
+    else
+      run_cmd netfilter-persistent save || warn "netfilter-persistent save 失败，将仅使用 iptables-save 写入"
+    fi
   fi
 
   local tmp
@@ -492,9 +509,10 @@ policy_of() {
 }
 
 # 一次 iptables -S 取回三条链策略与规则总数（菜单重绘热路径，避免 4 次 fork）
-ST_IN=""; ST_FW=""; ST_OUT=""; ST_COUNT=""
+# ST_OK=1 表示本次快照成功；失败时 ST_* 保持空值，展示层需显式提示而非显示成 "规则  条"
+ST_IN=""; ST_FW=""; ST_OUT=""; ST_COUNT="0"; ST_OK=0
 snapshot_state() {
-  ST_IN=""; ST_FW=""; ST_OUT=""; ST_COUNT=""
+  ST_IN=""; ST_FW=""; ST_OUT=""; ST_COUNT="0"; ST_OK=0
   have_iptables || return 1
   local out line
   out=$("${IPT[@]}" -S 2>/dev/null) || return 1
@@ -506,8 +524,10 @@ snapshot_state() {
       "-P FORWARD "*) ST_FW="${line##* }" ;;
       "-P OUTPUT "*)  ST_OUT="${line##* }" ;;
       "-A "*)         ST_COUNT=$((ST_COUNT + 1)) ;;
+      *) : ;;         # 其他行（自定义链等）不影响统计
     esac
   done <<<"${out}"
+  ST_OK=1
   return 0
 }
 
@@ -728,8 +748,7 @@ svc_disable() {
 
 menu_service() {
   while true; do
-    banner
-    printf '%b\n' "${C_BOLD}  服务控制${C_RESET}   ${C_DIM}启动 / 停止 / 重启 / 重载${C_RESET}"
+    menu_header "服务控制" "启动 / 停止 / 重启 / 重载"
     statusbar
     hr
     printf '%b\n' \
@@ -763,8 +782,7 @@ menu_service() {
 # ==============================================================================
 menu_view() {
   while true; do
-    banner
-    printf '%b\n' "${C_BOLD}  查看规则${C_RESET}   ${C_DIM}按表查看，带行号与命中流量${C_RESET}"
+    menu_header "查看规则" "按表查看，带行号与命中流量"
     statusbar
     hr
     printf '%b\n' \
@@ -921,8 +939,7 @@ apply_port_rule() {
 
 menu_add() {
   while true; do
-    banner
-    printf '%b\n' "${C_BOLD}  添加规则${C_RESET}   ${C_DIM}新规则追加到链尾，按添加顺序生效${C_RESET}"
+    menu_header "添加规则" "新规则追加到链尾，按添加顺序生效"
     statusbar
     hr
     printf '%b\n' \
@@ -1054,6 +1071,11 @@ add_ip_menu() {
 add_icmp_allow() {
   title "放行 ICMP（ping）"
   guard_iptables || return 1
+  # 去重：同类规则已存在就不再追加，避免反复执行堆叠多条
+  if "${IPT[@]}" -C INPUT -p icmp --icmp-type echo-request -m limit --limit 10/second -j ACCEPT >/dev/null 2>&1; then
+    info "放行 ping 的限速规则已存在，跳过"
+    return 0
+  fi
   run_cmd "${IPT[@]}" -A INPUT -p icmp --icmp-type echo-request -m limit --limit 10/second -j ACCEPT
   ok "已放行 ping（限速 10 次/秒，防 ICMP 洪水）"
 }
@@ -1061,6 +1083,10 @@ add_icmp_allow() {
 add_icmp_deny() {
   title "禁止 ICMP（禁 ping）"
   guard_iptables || return 1
+  if "${IPT[@]}" -C INPUT -p icmp --icmp-type echo-request -j DROP >/dev/null 2>&1; then
+    info "禁 ping 规则已存在，跳过"
+    return 0
+  fi
   run_cmd "${IPT[@]}" -A INPUT -p icmp --icmp-type echo-request -j DROP
   ok "已禁止 ping 请求"
 }
@@ -1152,25 +1178,26 @@ add_custom() {
 #                                  删除规则
 # ==============================================================================
 menu_delete() {
-  banner
-  printf '%b\n' "${C_BOLD}  删除规则${C_RESET}   ${C_DIM}建议先到【查看规则】确认行号${C_RESET}"
-  statusbar
-  hr
-  printf '%b\n' \
+  while true; do
+    menu_header "删除规则" "建议先到【查看规则】确认行号"
+    statusbar
+    hr
+    printf '%b\n' \
       "  ${C_GREEN}1${C_RESET}) 按行号删除单条规则" \
       "  ${C_GREEN}2${C_RESET}) 按链清空（只清某条链的所有规则）" \
       "  ${C_RED}3${C_RESET}) 清空全部规则（保留默认策略）" \
-      "  ${C_DIM}0${C_RESET}) 返回"
-  hr
-  printf '%b' "  ${C_BOLD}请选择${C_RESET} > "
-  local c; IFS= read -r c || return 0
-  case "${c}" in
-    1) delete_by_line; pause ;;
-    2) flush_chain;    pause ;;
-    3) flush_all;      pause ;;
-    0|"") return 0 ;;
-    *) err "无效选项"; sleep 1 ;;
-  esac
+      "  ${C_DIM}0${C_RESET}) 返回主菜单"
+    hr
+    printf '%b' "  ${C_BOLD}请选择${C_RESET} > "
+    local c; IFS= read -r c || return 0
+    case "${c}" in
+      1) delete_by_line; pause ;;
+      2) flush_chain;    pause ;;
+      3) flush_all;      pause ;;
+      0|"") return 0 ;;
+      *) err "无效选项"; sleep 1 ;;
+    esac
+  done
 }
 
 # 以 -S 格式带编号显示某条链（编号与删除索引完全一致）
@@ -1228,11 +1255,7 @@ flush_all() {
 若默认策略是 DROP，清空后可能直接失去远程连接"
   confirm "确认清空全部规则？" n || { info "已取消"; return 0; }
   auto_backup
-  local t
-  for t in filter nat mangle; do
-    "${IPT[@]}" -t "${t}" -F 2>/dev/null
-    "${IPT[@]}" -t "${t}" -X 2>/dev/null
-  done
+  _flush_tables
   ok "全部规则已清空（策略：$(policy_of INPUT) / $(policy_of FORWARD) / $(policy_of OUTPUT)）"
   warn "如需完全放行，请到【3 服务控制】执行停止"
 }
@@ -1242,8 +1265,7 @@ flush_all() {
 # ==============================================================================
 menu_policy() {
   while true; do
-    banner
-    printf '%b\n' "${C_BOLD}  策略与预设${C_RESET}   ${C_DIM}一键套用常用防火墙方案${C_RESET}"
+    menu_header "策略与预设" "一键套用常用防火墙方案"
     statusbar
     hr
     printf '%b\n' \
@@ -1448,8 +1470,7 @@ preset_open() {
 # ==============================================================================
 menu_advanced() {
   while true; do
-    banner
-    printf '%b\n' "${C_BOLD}  高级功能${C_RESET}   ${C_DIM}NAT / 转发 / 日志 / 测试${C_RESET}"
+    menu_header "高级功能" "NAT / 转发 / 日志 / 测试"
     statusbar
     hr
     printf '%b\n' \
@@ -1494,7 +1515,8 @@ adv_dnat() {
   if ! sysctl -n net.ipv4.ip_forward 2>/dev/null | grep -q '^1$'; then
     warn "IP 转发未开启，将自动开启"
     run_cmd sysctl -w net.ipv4.ip_forward=1
-    grep -q '^net.ipv4.ip_forward' /etc/sysctl.conf 2>/dev/null || \
+    # 判重需容忍 "net.ipv4.ip_forward = 1"（等号两侧带空格）的写法，避免重复追加
+    grep -qE '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=' /etc/sysctl.conf 2>/dev/null || \
       echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
   fi
   sub "即将执行"
@@ -1521,7 +1543,8 @@ adv_snat() {
 
   sysctl -n net.ipv4.ip_forward 2>/dev/null | grep -q '^1$' || {
     run_cmd sysctl -w net.ipv4.ip_forward=1
-    grep -q '^net.ipv4.ip_forward' /etc/sysctl.conf 2>/dev/null || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+    grep -qE '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=' /etc/sysctl.conf 2>/dev/null \
+      || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
   }
   echo
   run_cmd "${IPT[@]}" -t nat -A POSTROUTING -s "${net}" -o "${iface}" -j MASQUERADE
@@ -1543,11 +1566,13 @@ adv_ipforward() {
   case "${c}" in
     1)
       run_cmd sysctl -w net.ipv4.ip_forward=1
-      grep -q '^net.ipv4.ip_forward' /etc/sysctl.conf 2>/dev/null || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+      grep -qE '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=' /etc/sysctl.conf 2>/dev/null \
+        || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
       ok "已开启 IP 转发（并写入 /etc/sysctl.conf 永久生效）" ;;
     2)
       run_cmd sysctl -w net.ipv4.ip_forward=0
-      sed -i 's/^net.ipv4.ip_forward=1/net.ipv4.ip_forward=0/' /etc/sysctl.conf 2>/dev/null
+      # 兼容 "=1" 与 "= 1" 两种历史写法
+      sed -i 's/^\([[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*\)1/\10/' /etc/sysctl.conf 2>/dev/null
       ok "已关闭 IP 转发" ;;
     *) return 0 ;;
   esac
@@ -1578,6 +1603,8 @@ adv_test() {
   local host port
   read_input "目标主机" "127.0.0.1" host || return 0
   read_input "目标端口" "22" port || return 0
+  # host 会进入 /dev/tcp 重定向串，限制字符集防止意外执行其他内容
+  [[ ${host} =~ ^[A-Za-z0-9._-]+$ ]] || { err "主机名格式不合法（仅允许字母数字与 . _ -）"; return 1; }
   [[ ${port} =~ ^[0-9]+$ ]] || { err "端口不合法"; return 1; }
 
   printf '  %b %s:%s … ' "${C_DIM}测试${C_RESET}" "${host}" "${port}"
@@ -1600,8 +1627,7 @@ adv_test() {
 # ==============================================================================
 menu_persist() {
   while true; do
-    banner
-    printf '%b\n' "${C_BOLD}  保存 / 备份 / 恢复${C_RESET}   ${C_DIM}让规则在重启后依然生效${C_RESET}"
+    menu_header "保存 / 备份 / 恢复" "让规则在重启后依然生效"
     statusbar
     if has_unsaved; then
       printf '%b\n' "  ${C_YELLOW}⚠ 运行中的规则与磁盘 ${RULES_V4} 不一致，重启后这些改动会丢失${C_RESET}"
@@ -1837,25 +1863,30 @@ dashboard() {
   if have_iptables; then
     hr
     snapshot_state
-    local b_in b_fw b_out
-    badge_of "${ST_IN}";  b_in="${PB}"
-    badge_of "${ST_FW}";  b_fw="${PB}"
-    badge_of "${ST_OUT}"; b_out="${PB}"
-    kv "默认策略" "IN=${b_in}  FW=${b_fw}  OUT=${b_out}"
-    kv "规则数量" "${C_BOLD}${ST_COUNT}${C_RESET} 条"
-
-    local ports p blocked="" all_ok=1
-    ports=$(ssh_ports)
-    for p in ${ports}; do
-      if ! "${IPT[@]}" -C INPUT -p tcp --dport "${p}" -j ACCEPT >/dev/null 2>&1; then
-        all_ok=0
-        blocked+="${p} "
-      fi
-    done
-    if (( all_ok )); then
-      kv "SSH 端口" "${C_YELLOW}${ports}${C_RESET}  ${C_GREEN}✔ 已放行${C_RESET}"
+    if (( ! ST_OK )); then
+      kv "默认策略" "${C_YELLOW}无法读取${C_RESET} ${C_DIM}(权限不足或 netfilter 不可用)${C_RESET}"
+      kv "规则数量" "${C_YELLOW}无法读取${C_RESET}"
     else
-      kv "SSH 端口" "${C_YELLOW}${ports}${C_RESET}  ${C_RED}✘ 未放行：${blocked% }${C_RESET}"
+      local b_in b_fw b_out
+      badge_of "${ST_IN}";  b_in="${PB}"
+      badge_of "${ST_FW}";  b_fw="${PB}"
+      badge_of "${ST_OUT}"; b_out="${PB}"
+      kv "默认策略" "IN=${b_in}  FW=${b_fw}  OUT=${b_out}"
+      kv "规则数量" "${C_BOLD}${ST_COUNT}${C_RESET} 条"
+
+      local ports p blocked="" all_ok=1
+      ports=$(ssh_ports)
+      for p in ${ports}; do
+        if ! "${IPT[@]}" -C INPUT -p tcp --dport "${p}" -j ACCEPT >/dev/null 2>&1; then
+          all_ok=0
+          blocked+="${p} "
+        fi
+      done
+      if (( all_ok )); then
+        kv "SSH 端口" "${C_YELLOW}${ports}${C_RESET}  ${C_GREEN}✔ 已放行${C_RESET}"
+      else
+        kv "SSH 端口" "${C_YELLOW}${ports}${C_RESET}  ${C_RED}✘ 未放行：${blocked% }${C_RESET}"
+      fi
     fi
   fi
 
@@ -1886,6 +1917,7 @@ banner() {
   printf '%b\n' "  ${C_CYAN}${C_BOLD}╭${line}╮${C_RESET}"
   printf '%b\n' "  ${C_CYAN}${C_BOLD}│${C_RESET}  ${C_WHITE}${C_BOLD}iptables-wizard${C_RESET} ${C_DIM}v${VERSION}${C_RESET}   ${C_DIM}·${C_RESET}   ${C_BOLD}Debian 防火墙一键管理工具${C_RESET}"
   printf '%b\n' "  ${C_CYAN}${C_BOLD}╰${line}╯${C_RESET}"
+  printf '%b\n' "  ${C_DIM}$(hostname 2>/dev/null)${C_RESET}  ${C_DIM}·${C_RESET}  ${C_DIM}$(os_pretty_name)${C_RESET}"
   printf '%b\n' "  ${C_DIM}需要 root 权限 · 变更前自动备份 · 规则持久化到 ${RULES_V4}${C_RESET}"
 }
 
@@ -1896,10 +1928,13 @@ main_menu() {
   while true; do
     dashboard
     hr
-    printf '%b\n' "  ${C_BOLD}功能菜单${C_RESET}   ${C_DIM}输入编号后回车${C_RESET}"
+    printf '%b\n' "  ${C_BOLD}功能菜单${C_RESET}   ${C_DIM}输入编号回车 · 0 或 q 退出${C_RESET}"
+    menu_group 状态
     menu_row 1 "状态概览"   2 "安装与检测"
+    menu_group 服务与规则
     menu_row 3 "服务控制"   4 "查看规则"
     menu_row 5 "添加规则"   6 "删除规则"
+    menu_group 策略与维护
     menu_row 7 "策略与预设" 8 "高级功能"
     menu_row 9 "保存 / 备份" 0 "退出"
     hr
@@ -1971,7 +2006,13 @@ main() {
     restart) svc_restart ;;
     reload)  svc_reload ;;
     doctor|check) doctor ;;
-    backup)  f=$(backup_rules) && echo "备份完成：${f}" ;;
+    backup)
+      if f=$(backup_rules); then
+        echo "备份完成：${f}"
+      else
+        err "备份失败（请检查磁盘空间与权限）"
+        exit 1
+      fi ;;
     restore)
       [[ -z ${2:-} ]] && { err "请指定备份文件路径"; exit 1; }
       [[ -f $2 ]] || { err "文件不存在：$2"; exit 1; }

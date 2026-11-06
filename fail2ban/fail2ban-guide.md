@@ -466,6 +466,7 @@ ERROR  ERROR: test configuration failed
 | `Failed to execute ban jail 'sshd' action ...` / `iptables: not found` | `banaction` 与系统工具不匹配（Debian 12 默认 nftables，可能没有 iptables 命令） | `banaction = nftables` 或 `apt install iptables` |
 | `Unable to read the filter` / `No such file ... filter.d/xxx.conf` | `filter` 名字写错或自定义 filter 未创建 | 检查 `/etc/fail2ban/filter.d/<名字>.conf` |
 | `Invalid port` | `port` 写法错误（空值、多余空格、错误分隔符） | 用逗号分隔，如 `port = 22,2222` |
+| 打出 `Server ready` 之后才退出 | jail 启动阶段失败（配置本身没问题） | 见下方「两个容易踩的坑」第 2 条 |
 
 **修复步骤（日志缺失型，最常见）**
 
@@ -473,20 +474,26 @@ ERROR  ERROR: test configuration failed
 # 1. 确认确实没有这个文件
 ls -l /var/log/auth.log
 
-# 2. 备份后修正：注释 logpath，补 backend = systemd
+# 2. 备份
 sudo cp -a /etc/fail2ban/jail.local /etc/fail2ban/jail.local.bak
-sudo awk '
-  /^\[sshd\]/ { print; print "backend  = systemd"; ins=1; next }
-  /^\[/ { ins=0 }
-  ins && /^[[:space:]]*backend[[:space:]]*=/ { next }
-  ins && /^[[:space:]]*logpath[[:space:]]*=/ { print "# " $0; next }
-  { print }
-' /etc/fail2ban/jail.local > /tmp/jl.new && sudo cp /tmp/jl.new /etc/fail2ban/jail.local && rm -f /tmp/jl.new
 
-# 3. 先做配置语法检查（这一步过了再启动，不要盲目 restart）
+# 3. 注释掉所有 logpath 行（不用写正则括号，粘贴不会出错）
+sudo sed -i '/logpath/s/^/# /' /etc/fail2ban/jail.local
+
+# 4. 用 drop-in 覆盖 backend（jail.d/*.local 优先级最高，比改 jail.local 更干净）
+sudo tee /etc/fail2ban/jail.d/zz-sshd-systemd.local >/dev/null <<'EOF'
+[sshd]
+backend = systemd
+EOF
+
+# 5. 确认改动生效
+grep -n "logpath" /etc/fail2ban/jail.local
+cat /etc/fail2ban/jail.d/zz-sshd-systemd.local
+
+# 6. 先做配置语法检查（这一步过了再启动，不要盲目 restart）
 sudo fail2ban-client -t
 
-# 4. 启动
+# 7. 启动
 sudo systemctl restart fail2ban
 sudo systemctl status fail2ban --no-pager
 ```
@@ -512,7 +519,34 @@ sudo journalctl -u fail2ban -f      # 另开一个窗口观察
 ```
 
 > 用本仓库一键脚本安装的话，v1.0.5 起已自动判断 `auth.log` 是否存在来选择日志后端，
-> 不会再写出这个错误配置。老版本可执行 `sudo fail2ban-tool doctor`，它会检测并交互式修复。
+> 不会再写出这个错误配置。v1.0.6 起 `install` 遇到**已存在**的 `jail.local` 也会先检查
+> `logpath` / `banaction` 是否会导致 255，并询问是否就地修复。
+> 老版本可执行 `sudo fail2ban-tool doctor`，它会检测并交互式修复。
+
+**两个容易踩的坑**
+
+1. **`fail2ban-client -t` 别敲成 `-`**
+   只敲 `-` 会去连正在运行的服务，报 `Failed to access socket path: /var/run/fail2ban/fail2ban.sock. Is fail2ban running?`，
+   看起来像"服务没起来"，其实是命令敲错了。`-t`（test）只读配置、不连 socket，服务死了也能用。
+
+2. **日志里出现 `Server ready` 之后仍然 255**
+   说明配置这关过了（`fail2ban-client -t` 也会通过），是**启动 jail 时**才失败的。
+   注意 fail2ban 的 jail 是异步启动的，所以错误出现在 `Server ready` 之后很正常。
+   三个高频原因：
+
+   | 现象 | 原因 | 修复 |
+   |------|------|------|
+   | `Server ready` 后立刻退出，无 ERROR | `backend = systemd` 但缺 `python3-systemd` 模块 | `sudo apt install -y python3-systemd` |
+   | 同上，且 `fail2ban-client` 报 socket 不存在 | `/var/run/fail2ban` 目录缺失 | `sudo mkdir -p /var/run/fail2ban` |
+   | 同上，且 `pgrep -af fail2ban-server` 有输出 | 残留进程占着 socket | `sudo pkill -f fail2ban-server`，再删掉 `/var/run/fail2ban/fail2ban.sock` |
+
+   用前台模式跑一次，错误会直接打在屏幕上：
+
+   ```bash
+   sudo systemctl stop fail2ban
+   sudo fail2ban-server -f -vv start 2>&1 | tail -n 40
+   # 看完按 Ctrl+C 退出，再 systemctl start fail2ban
+   ```
 
 ---
 

@@ -6,13 +6,14 @@
 #    1. 语法检查        bash -n 全部 shell 脚本
 #    2. 静态分析        shellcheck -S style（--strict 提到 info 级）
 #    3. 冒烟测试        tests/smoke.sh（不需要 root，不动真实 netfilter）
-#    4. 安装器新鲜度    scripts/build-install.sh --check
-#    5. 安装器自检      install.sh --check（sha256 + bash -n + 版本）
-#    6. 版本一致性      内嵌版本 == 主脚本 VERSION，且无残留占位符
+#    4. 安装端到端      tests/e2e-install.sh（模拟 curl | bash：安装/--run/进界面/卸载）
+#    5. 安装器新鲜度    scripts/build-install.sh --check
+#    6. 安装器自检      install.sh --check（sha256 + bash -n + 版本）
+#    7. 版本一致性      内嵌版本 == 主脚本 VERSION，且无残留占位符
 #
 #  用法：
 #    bash ci.sh                    # 全量检查
-#    bash ci.sh --quick            # 跳过冒烟测试（改文档/注释时用）
+#    bash ci.sh --quick            # 跳过冒烟与端到端测试（改文档/注释时用）
 #    bash ci.sh --strict           # shellcheck 提升到 info 级别
 #    bash ci.sh --fix              # 先重新生成 install.sh，再做全量检查
 #    bash ci.sh --only syntax,version   # 只跑指定项
@@ -34,6 +35,7 @@ cd "${ROOT_DIR}" || { printf '无法进入目录 %s\n' "${ROOT_DIR}" >&2; exit 1
 WIZARD="${ROOT_DIR}/iptables-wizard.sh"
 INSTALLER="${ROOT_DIR}/install.sh"
 SMOKE="${ROOT_DIR}/tests/smoke.sh"
+E2E="${ROOT_DIR}/tests/e2e-install.sh"
 BUILD="${ROOT_DIR}/scripts/build-install.sh"
 TEMPLATE="${ROOT_DIR}/scripts/install.template.sh"
 
@@ -76,7 +78,7 @@ while (( $# )); do
     --color)     USE_COLOR=1 ;;
     --only)      shift; ONLY="${1:-}" ;;
     --only=*)    ONLY="${1#*=}" ;;
-    --list)      printf '检查项：syntax shellcheck smoke build installer version\n'; exit 0 ;;
+    --list)      printf '检查项：syntax shellcheck smoke e2e build installer version\n'; exit 0 ;;
     -h|--help)   usage ;;
     *)           printf '未知参数：%s（--help 查看用法）\n' "$1" >&2; exit 2 ;;
   esac
@@ -131,7 +133,7 @@ SHELL_FILES=()
 collect_files() {
   local f
   for f in "${WIZARD}" "${INSTALLER}" "${BUILD}" "${TEMPLATE}" "${SMOKE}" \
-           "${ROOT_DIR}/ci.sh"; do
+           "${E2E}" "${ROOT_DIR}/ci.sh"; do
     [[ -f ${f} ]] && SHELL_FILES+=("${f}")
   done
 }
@@ -142,15 +144,16 @@ rel() { printf '%s' "${1#"${ROOT_DIR}/"}"; }
 
 # 1) 语法检查 ---------------------------------------------------------------
 step_syntax() {
-  local f out rc bad=0
+  local f out rc rf bad=0
   for f in "${SHELL_FILES[@]}"; do
     out=$(bash -n "${f}" 2>&1)
     rc=$?
+    rf=$(rel "${f}")
     if (( rc == 0 )); then
-      printf '   %b %s\n' "${C_GREEN}${MARK_OK}${C_RESET}" "$(rel "${f}")"
+      printf '   %b %s\n' "${C_GREEN}${MARK_OK}${C_RESET}" "${rf}"
     else
       bad=1
-      printf '   %b %s\n' "${C_RED}${MARK_NO}${C_RESET}" "$(rel "${f}")"
+      printf '   %b %s\n' "${C_RED}${MARK_NO}${C_RESET}" "${rf}"
       printf '%s\n' "${out}" | sed 's/^/       /'
     fi
   done
@@ -187,9 +190,10 @@ step_shellcheck() {
 
 # 3) 冒烟测试 ---------------------------------------------------------------
 step_smoke() {
-  local out rc summary
+  local out rc summary rf
   if [[ ! -f ${SMOKE} ]]; then
-    printf '   %b 找不到 %s\n' "${C_RED}${MARK_NO}${C_RESET}" "$(rel "${SMOKE}")"
+    rf=$(rel "${SMOKE}")
+    printf '   %b 找不到 %s\n' "${C_RED}${MARK_NO}${C_RESET}" "${rf}"
     return 1
   fi
   out=$(bash "${SMOKE}" 2>&1)
@@ -204,11 +208,31 @@ step_smoke() {
   return 0
 }
 
+# 3b) 安装端到端测试（curl | bash 形态模拟） ---------------------------------
+step_e2e() {
+  local out rc summary rf
+  if [[ ! -f ${E2E} ]]; then
+    rf=$(rel "${E2E}")
+    printf '   %b 找不到 %s\n' "${C_RED}${MARK_NO}${C_RESET}" "${rf}"
+    return 1
+  fi
+  out=$(bash "${E2E}" 2>&1)
+  rc=$?
+  if (( rc != 0 )); then
+    printf '%s\n' "${out}" | sed 's/^/       /'
+    return 1
+  fi
+  summary=$(printf '%s\n' "${out}" | grep -o 'e2e 全部通过.*' | tail -n 1)
+  printf '   %b %s\n' "${C_GREEN}${MARK_OK}${C_RESET}" "${summary:-全部通过}"
+  return 0
+}
+
 # 4) 安装器新鲜度 -----------------------------------------------------------
 step_build() {
-  local out rc
+  local out rc rf
   if [[ ! -f ${BUILD} ]]; then
-    printf '   %b 找不到 %s\n' "${C_RED}${MARK_NO}${C_RESET}" "$(rel "${BUILD}")"
+    rf=$(rel "${BUILD}")
+    printf '   %b 找不到 %s\n' "${C_RED}${MARK_NO}${C_RESET}" "${rf}"
     return 1
   fi
   if (( DO_FIX )); then
@@ -291,14 +315,15 @@ step_version() {
 
 # ================================================================ 调度器 =====
 
-STEP_KEYS=(   syntax  shellcheck  smoke  build  installer  version )
+STEP_KEYS=(   syntax  shellcheck  smoke  e2e  build  installer  version )
 STEP_LABELS=( "语法检查 (bash -n)" \
               "静态分析 (shellcheck)" \
               "冒烟测试 (tests/smoke.sh)" \
+              "安装端到端 (tests/e2e-install.sh)" \
               "安装器新鲜度 (build-install --check)" \
               "安装器自检 (install.sh --check)" \
               "版本一致性" )
-STEP_FUNCS=(  step_syntax step_shellcheck step_smoke step_build step_installer step_version )
+STEP_FUNCS=(  step_syntax step_shellcheck step_smoke step_e2e step_build step_installer step_version )
 
 SEL_KEYS=(); SEL_LABELS=(); SEL_FUNCS=()
 
@@ -312,7 +337,7 @@ select_steps() {
         *) continue ;;
       esac
     fi
-    if (( QUICK )) && [[ ${key} == smoke ]]; then continue; fi
+    if (( QUICK )) && [[ ${key} == smoke || ${key} == e2e ]]; then continue; fi
     SEL_KEYS+=("${key}")
     SEL_LABELS+=("${STEP_LABELS[$i]}")
     SEL_FUNCS+=("${STEP_FUNCS[$i]}")
